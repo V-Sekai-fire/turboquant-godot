@@ -34,7 +34,6 @@
 #include "core/error/error_macros.h"
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
-#include "core/os/os.h"
 
 #include "thirdparty/llama_cpp/include/llama.h"
 
@@ -95,10 +94,6 @@ bool LLMModel::get_use_mlock() const {
 }
 
 Error LLMModel::load() {
-	if (model_path.is_empty()) {
-		model_path = OS::get_singleton()->get_environment("HOME") +
-				"/.cache/llm/Qwen3.5-0.8B-heretic-Q4_K_M.gguf";
-	}
 	ERR_FAIL_COND_V_MSG(model_path.is_empty(), ERR_UNCONFIGURED, "LLMModel: model_path is not set.");
 	ERR_FAIL_COND_V_MSG(model != nullptr, ERR_ALREADY_IN_USE, "LLMModel: model is already loaded.");
 
