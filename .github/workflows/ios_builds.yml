@@ -9,6 +9,7 @@ env:
     dev_mode=yes
     module_text_server_fb_enabled=yes
     debug_symbols=no
+    scu_build=yes
 
 jobs:
   ios-template:
