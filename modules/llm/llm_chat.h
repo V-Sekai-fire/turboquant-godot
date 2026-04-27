@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "llm_context.h"
 #include "llm_model.h"
 
@@ -68,6 +70,10 @@ class LLMChat : public RefCounted {
 	Thread worker;
 	Mutex worker_mutex;
 	bool busy = false;
+
+	// Tokens currently prefilled in the KV cache. Persisted across turns so
+	// each complete() only prefills the new suffix rather than the full prompt.
+	std::vector<llama_token> cached_tokens;
 
 	struct Job {
 		Array messages;
