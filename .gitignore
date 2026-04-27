@@ -403,7 +403,7 @@ $RECYCLE.BIN/
 *.generated.props
 
 # llm module — generated build artifacts
-modules/llm/thirdparty/llama_cpp/ggml/src/ggml-vulkan/ggml-vulkan-shaders.hpp
-modules/llm/thirdparty/llama_cpp/ggml/src/ggml-vulkan/vulkan-shaders.spv/
-modules/llm/thirdparty/llama_cpp/ggml/src/ggml-metal/ggml-metal-embed.gen.cpp
-modules/llm/thirdparty/llama_cpp/ggml/src/ggml-vulkan/mingw-implib/
+thirdparty/llama_cpp/ggml/src/ggml-vulkan/ggml-vulkan-shaders.hpp
+thirdparty/llama_cpp/ggml/src/ggml-vulkan/vulkan-shaders.spv/
+thirdparty/llama_cpp/ggml/src/ggml-metal/ggml-metal-embed.gen.cpp
+thirdparty/llama_cpp/ggml/src/ggml-vulkan/mingw-implib/
