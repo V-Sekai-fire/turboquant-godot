@@ -30,6 +30,9 @@
 
 #include "llm_chat.h"
 
+#include <string>
+#include <vector>
+
 #include "core/error/error_macros.h"
 #include "core/object/class_db.h"
 #include "core/variant/dictionary.h"
