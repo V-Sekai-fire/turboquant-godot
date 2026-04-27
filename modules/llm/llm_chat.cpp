@@ -35,9 +35,9 @@
 #include "core/os/os.h"
 #include "core/variant/dictionary.h"
 
-#include "modules/llm/thirdparty/llama_cpp/common/common.h"
-#include "modules/llm/thirdparty/llama_cpp/common/sampling.h"
-#include "modules/llm/thirdparty/llama_cpp/include/llama.h"
+#include "thirdparty/llama_cpp/common/common.h"
+#include "thirdparty/llama_cpp/common/sampling.h"
+#include "thirdparty/llama_cpp/include/llama.h"
 
 void LLMChat::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "model", "context"), &LLMChat::setup);
