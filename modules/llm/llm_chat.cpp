@@ -120,6 +120,10 @@ void LLMChat::complete(const Array &p_messages) {
 	ERR_FAIL_COND_MSG(model.is_null() || !model->is_loaded(), "LLMChat: model not loaded.");
 	ERR_FAIL_COND_MSG(context.is_null() || !context->is_valid(), "LLMChat: context not valid.");
 
+	if (worker.is_started()) {
+		worker.wait_to_finish();
+	}
+
 	Job *job = memnew(Job);
 	job->messages = p_messages;
 	job->self = this;
