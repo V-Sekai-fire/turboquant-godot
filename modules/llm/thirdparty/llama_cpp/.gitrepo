@@ -1,0 +1,11 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/TheTom/llama-cpp-turboquant
+	branch = feature/turboquant-kv-cache
+	commit = 67559e580b10e4e47e9a6fd6218873997976886d
+	parent = 1c8cc9e7e2c9a083cf726e74193d3824fb38cda4
+	cmdver = 0.1.0

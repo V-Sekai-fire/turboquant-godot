@@ -1,0 +1,369 @@
+#!/usr/bin/env python
+# SCsub CWD = modules/llm/ — all tp paths are relative to here.
+from misc.utility.scons_hints import *
+
+import sys
+
+Import("env")
+Import("env_modules")
+
+tp = "thirdparty/llama_cpp/"
+tp_abs = "#modules/llm/" + tp  # absolute from project root (for CPPPATH)
+
+ggml_inc = [
+    tp_abs + "ggml/include",
+    tp_abs + "ggml/src",
+    tp_abs + "ggml/src/ggml-cpu",
+]  # amx/ subdir needs ggml-cpu-impl.h
+llama_inc = [tp_abs + "include", tp_abs + "src", tp_abs + "common", tp_abs + "vendor"]  # nlohmann/json lives here
+all_inc = ggml_inc + llama_inc + ["#modules/llm/compat"]  # spirv-headers/ shim for Windows SDK layout
+
+# ── Collision map ─────────────────────────────────────────────────────────────
+# These basenames exist as both .c and .cpp (or .m) in the source tree.
+# SCons derives the object name from the basename, so we must compile them
+# with explicit unique targets to avoid "Multiple ways to build" errors.
+#
+#   ggml/src/ggml            .c (7839 ln, real)  +  .cpp (26 ln, C++ terminate handler — DROP)
+#   ggml/src/ggml-cpu/ggml-cpu  .c (3934 ln)    +  .cpp (703 ln, both needed — EXPLICIT)
+#   ggml/src/ggml-metal/ggml-metal-device  .cpp (2130 ln) + .m (1849 ln, both needed — EXPLICIT)
+
+# ── ggml core ─────────────────────────────────────────────────────────────────
+ggml_c_sources = [
+    tp + "ggml/src/ggml.c",  # keep .c; ggml.cpp is a 26-line terminate handler
+    tp + "ggml/src/ggml-alloc.c",
+    tp + "ggml/src/ggml-quants.c",
+    tp + "ggml/src/ggml-turbo-quant.c",
+]
+
+ggml_cpp_sources = [
+    # ggml.cpp omitted (see collision map above)
+    tp + "ggml/src/ggml-backend.cpp",
+    tp + "ggml/src/ggml-backend-reg.cpp",
+    tp + "ggml/src/ggml-backend-meta.cpp",
+    # ggml-backend-dl.cpp omitted: dynamic loading disabled (no GGML_BACKEND_DL).
+    tp + "ggml/src/ggml-threading.cpp",
+    tp + "ggml/src/ggml-opt.cpp",
+    tp + "ggml/src/gguf.cpp",
+]
+
+# ── ggml-cpu backend — excluded on web (WebGPU handles all compute) ──────────
+ggml_cpu_src = tp + "ggml/src/ggml-cpu/"
+ggml_cpu_sources = []
+
+if env["platform"] != "web":
+    ggml_cpu_sources = [
+        # ggml-cpu.c and ggml-cpu.cpp handled below via explicit objects
+        ggml_cpu_src + "binary-ops.cpp",
+        ggml_cpu_src + "hbm.cpp",
+        ggml_cpu_src + "ops.cpp",
+        ggml_cpu_src + "quants.c",
+        ggml_cpu_src + "repack.cpp",
+        ggml_cpu_src + "traits.cpp",
+        ggml_cpu_src + "unary-ops.cpp",
+        ggml_cpu_src + "vec.cpp",
+    ]
+
+    # Architecture-specific CPU implementations
+    _target_arch = env.get("arch", "")
+    _is_arm = _target_arch in ("arm64", "arm32", "armv7") or env["platform"] == "android"
+    if _is_arm:
+        ggml_cpu_sources += [
+            ggml_cpu_src + "arch/arm/quants.c",
+            ggml_cpu_src + "arch/arm/repack.cpp",
+            ggml_cpu_src + "arch/arm/cpu-feats.cpp",
+        ]
+    else:
+        ggml_cpu_sources += [
+            ggml_cpu_src + "arch/x86/quants.c",
+        ] + list(Glob(ggml_cpu_src + "arch/x86/*.cpp"))
+
+# ── llama.cpp core ────────────────────────────────────────────────────────────
+llama_sources = list(Glob(tp + "src/models/*.cpp")) + [
+    tp + "src/llama.cpp",
+    tp + "src/llama-adapter.cpp",
+    tp + "src/llama-arch.cpp",
+    tp + "src/llama-batch.cpp",
+    tp + "src/llama-chat.cpp",
+    tp + "src/llama-context.cpp",
+    tp + "src/llama-cparams.cpp",
+    tp + "src/llama-grammar.cpp",
+    tp + "src/llama-graph.cpp",
+    tp + "src/llama-hparams.cpp",
+    tp + "src/llama-impl.cpp",
+    tp + "src/llama-io.cpp",
+    tp + "src/llama-kv-cache.cpp",
+    tp + "src/llama-kv-cache-iswa.cpp",
+    tp + "src/llama-memory.cpp",
+    tp + "src/llama-memory-hybrid.cpp",
+    tp + "src/llama-memory-hybrid-iswa.cpp",
+    tp + "src/llama-memory-recurrent.cpp",
+    tp + "src/llama-mmap.cpp",
+    tp + "src/llama-model.cpp",
+    tp + "src/llama-model-loader.cpp",
+    tp + "src/llama-model-saver.cpp",
+    tp + "src/llama-quant.cpp",
+    tp + "src/llama-sampler.cpp",
+    tp + "src/llama-vocab.cpp",
+    tp + "src/unicode.cpp",
+    tp + "src/unicode-data.cpp",
+]
+
+common_sources = [
+    tp + "common/common.cpp",
+    tp + "common/chat.cpp",
+    tp + "common/sampling.cpp",
+    tp + "common/log.cpp",
+]
+
+# ── GPU backends ──────────────────────────────────────────────────────────────
+import os as _os
+
+backend_sources = []
+backend_defines = []
+platform = env["platform"]
+sys.path.insert(0, Dir("#modules/llm").abspath)
+
+# ── Metal: macOS and iOS ──────────────────────────────────────────────────────
+if platform in ("macos", "ios"):
+    from metal_builders import generate_metal_embed
+
+    metal_src = tp + "ggml/src/ggml-metal/"
+    backend_sources += [
+        metal_src + "ggml-metal.cpp",
+        metal_src + "ggml-metal-ops.cpp",
+        metal_src + "ggml-metal-common.cpp",
+        # .m files compiled below (after env_tp) with -fno-objc-arc
+    ]
+    backend_defines += ["GGML_USE_METAL"]
+    env.Append(
+        LINKFLAGS=[
+            "-framework",
+            "Metal",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "CoreGraphics",
+        ]
+    )
+    # Embed Metal source as a C char array (metal_builders.py gen.cpp pattern).
+    # Metal compiles it at runtime via newLibraryWithSource: — no xcrun needed.
+    _metal_dir = Dir("#modules/llm/" + metal_src).abspath + "/"
+    _metal_src_file = _metal_dir + "ggml-metal.metal"
+    _metal_common = Dir("#modules/llm/" + tp + "ggml/src/").abspath + "/ggml-common.h"
+    _metal_impl = _metal_dir + "ggml-metal-impl.h"
+    _embed_gen = Dir("#modules/llm/thirdparty/llama_cpp/ggml/src/ggml-metal").abspath + "/ggml-metal-embed.gen.cpp"
+    env.Command(_embed_gen, [_metal_src_file, _metal_common, _metal_impl], generate_metal_embed)
+    backend_sources += [_embed_gen]
+    backend_defines += ["GGML_METAL_EMBED_LIBRARY"]
+
+# ── Vulkan: Linux, Windows, Android (not macOS/iOS/web) ──────────────────────
+# macOS uses Metal via ggml-metal; no Vulkan needed there.
+if platform in ("linuxbsd", "windows", "android"):
+    from vulkan_builders import generate_vulkan_shaders, get_generated_shader_cpps
+
+    _vk_src = tp + "ggml/src/ggml-vulkan/"
+    _vk_abs = Dir("#modules/llm/" + _vk_src).abspath
+    _vk_spv_dir = _vk_abs + "/vulkan-shaders.spv"
+    _vk_hpp = _vk_abs + "/ggml-vulkan-shaders.hpp"  # must match #include in ggml-vulkan.cpp
+
+    # Propagate vulkan_sdk_path → VULKAN_SDK so vulkan_builders.py finds glslc.
+    _scons_sdk = env.get("vulkan_sdk_path", "")
+    if _scons_sdk and not _os.environ.get("VULKAN_SDK"):
+        _os.environ["VULKAN_SDK"] = _scons_sdk
+
+    # Generate shaders at SCons reading phase so hpp exists before compilation.
+    generate_vulkan_shaders(_vk_abs, _vk_spv_dir, _vk_hpp)
+
+    backend_sources += [_vk_src + "ggml-vulkan.cpp"]
+    backend_defines += ["GGML_USE_VULKAN"]
+    all_inc += [_vk_abs]
+
+    # spirv/unified1/spirv.hpp — use Godot's own vendored copy, no VULKAN_SDK needed.
+    all_inc += ["#thirdparty/spirv-headers/include"]
+
+    # Resolve SDK path: prefer Godot's vulkan_sdk_path scons param, fall back to env var.
+    _sdk = env.get("vulkan_sdk_path", "") or _os.environ.get("VULKAN_SDK", "")
+
+    if platform == "android":
+        # Android Vulkan is part of the system image — just link it.
+        # Do NOT append NDK sysroot headers to env: Godot's Android build
+        # already configures them in the correct order, and adding them again
+        # disrupts libc++'s expected include ordering (NDK 29+).
+        env.Append(LIBS=["vulkan"])  # libvulkan.so is part of the Android system image
+
+    elif platform == "windows":
+        # Windows: link vulkan-1.dll (always present on Win7+ with modern GPU drivers).
+        # For MinGW cross-compile generate a stub import library with dlltool.
+        _is_cross = sys.platform != "win32"
+        if _is_cross and _sdk:
+            from vulkan_builders import generate_mingw_vulkan_implib
+
+            _implib_dir = Dir("#modules/llm/thirdparty/llama_cpp/ggml/src/ggml-vulkan").abspath + "/mingw-implib"
+            _implib = generate_mingw_vulkan_implib(_sdk + "/include", _implib_dir)
+            # Pass the full .dll.a path directly — no sysroot modification needed
+            env.Append(LINKFLAGS=[_implib])
+        else:
+            env.Append(LIBS=["vulkan-1"])  # native Windows MSVC/MinGW has the loader
+
+    else:
+        # Linux: link libvulkan via SDK path
+        if _sdk:
+            env.Append(LIBS=["vulkan"], LIBPATH=[_sdk + "/lib"])
+        else:
+            print("llm module WARNING: Vulkan SDK not found.")
+            print("  Pass vulkan_sdk_path=/path/to/sdk to scons, or set VULKAN_SDK.")
+            env.Append(LIBS=["vulkan"])
+
+# ── WebGPU: web (Emscripten + emdawnwebgpu port) ─────────────────────────────
+if platform == "web":
+    from webgpu_builders import generate_webgpu_shaders
+
+    _wgpu_src = tp + "ggml/src/ggml-webgpu/"
+    _wgpu_abs = Dir("#modules/llm/" + _wgpu_src).abspath
+    _wgpu_hpp = _wgpu_abs + "/ggml-wgsl-shaders.hpp"
+
+    # Embed WGSL shaders at SCons reading phase so the header exists before compilation.
+    generate_webgpu_shaders(_wgpu_abs, _wgpu_hpp)
+
+    # ggml-webgpu.cpp is compiled separately below with a dedicated env so that
+    # --use-port=emdawnwebgpu (which forces -enable-emscripten-sjlj) is NOT
+    # applied globally. Spreading it via env.CCFLAGS causes a clang error on every
+    # other file that also gets -fexceptions:
+    #   invalid argument '-wasm-enable-sjlj' not allowed with
+    #   '-enable-emscripten-cxx-exceptions'
+    backend_defines += ["GGML_USE_WEBGPU"]
+    all_inc += [_wgpu_abs]
+
+    # Godot's detect.py sets -sSUPPORT_LONGJMP='wasm' unconditionally, which
+    # forces -wasm-enable-sjlj on every TU. -fexceptions would add
+    # -enable-emscripten-cxx-exceptions on the same TU → conflict.
+    # Only -fwasm-exceptions (WASM native EH) is compatible with WASM SjLj.
+    # Signal env_tp (below) to use it, and add the runtime to the link step.
+    env["_llm_web_wasm_eh"] = True
+
+    # Link: emdawnwebgpu JS runtime + WASM EH runtime + JSPI async.
+    # ASYNCIFY=1 (bytecode transform) is incompatible with -fwasm-exceptions; use
+    # ASYNCIFY=2 (JSPI) instead — the browser engine suspends/resumes the wasm stack
+    # natively, no bytecode rewriting, compatible with wasm-exceptions and WebGPU.
+    env.Append(LINKFLAGS=["--use-port=emdawnwebgpu", "-fwasm-exceptions", "-sASYNCIFY=2"])
+
+# ── Thirdparty build env ──────────────────────────────────────────────────────
+# llama.cpp uses try/catch/throw internally. Enable exceptions for vendored
+# code only — Godot core and module wrapper code stay exceptions-free.
+env_tp = env.Clone()
+env_tp.Prepend(CPPPATH=all_inc)
+env_tp.Append(
+    CPPDEFINES=[
+        "GGML_USE_LLAMAFILE=0",
+        "LLAMA_BUILD",
+        # GGML_USE_CPU omitted on web — WebGPU is the only backend; no CPU kernels compiled
+        *([] if env["platform"] == "web" else ["GGML_USE_CPU"]),
+        # cmake-generated version strings
+        'GGML_VERSION=\\"0.10.0\\"',
+        'GGML_COMMIT=\\"turboquant-kv-cache\\"',
+    ]
+    + backend_defines
+)
+if env.msvc:
+    env_tp.Append(CCFLAGS=["/EHsc", "/W0"])  # /W0 suppresses all warnings (clang-cl -Werror hits unused-function)
+else:
+    # Flags shared by both C and C++ vendored files
+    env_tp.Append(CCFLAGS=["-w", "-include", "errno.h"])
+    # llama.cpp uses try/catch/throw. Godot sets -fno-exceptions globally via
+    # disable_exceptions=yes; strip it from env_tp so our exceptions flag wins.
+    env_tp["CXXFLAGS"] = [f for f in env_tp["CXXFLAGS"] if f != "-fno-exceptions"]
+    # Godot's web build sets -sSUPPORT_LONGJMP='wasm' (WASM SjLj) unconditionally.
+    # -fexceptions (Emscripten JS EH) conflicts with it; -fwasm-exceptions does not.
+    _exc_flag = "-fwasm-exceptions" if env.get("_llm_web_wasm_eh") else "-fexceptions"
+    compat_h = Dir(".").abspath + "/llama_compat.h"
+    # getenv/atoi not in scope on Emscripten or Android without explicit pull-in
+    _stdlib_extras = ["-include", "cstdlib"] if platform in ("web", "android") else []
+    env_tp.Append(
+        CXXFLAGS=[
+            _exc_flag,
+            "-include",
+            "memory",  # std::unique_ptr in ggml-metal.cpp
+            "-include",
+            compat_h,  # undefine broken __cpp_lib_hardware_interference_size
+        ]
+        + _stdlib_extras
+    )
+
+if platform == "linuxbsd":
+    env_tp.Append(CPPDEFINES=["_GNU_SOURCE"])  # SCHED_BATCH in ggml-cpu.c
+
+env_tp.add_source_files(
+    env.modules_sources,
+    ggml_c_sources + ggml_cpp_sources + ggml_cpu_sources + llama_sources + common_sources + backend_sources,
+)
+
+# ── WebGPU dedicated compilation ──────────────────────────────────────────────
+# ggml-webgpu.cpp must be compiled with --use-port=emdawnwebgpu so the compiler
+# finds <webgpu/webgpu_cpp.h>. The port forces -enable-emscripten-sjlj which
+# conflicts with -fexceptions on the same TU, so we use -fno-exceptions here
+# (the webgpu backend itself doesn't throw). All other env_tp files are unaffected.
+if platform == "web":
+    # Build from env (not env_tp) to guarantee a fresh CCFLAGS list.
+    # env_tp.Clone().Append() shares the underlying SCons CLVar and mutates
+    # env_tp's CCFLAGS in-place, spreading --use-port=emdawnwebgpu (and its
+    # forced -enable-emscripten-sjlj) to every other TU. Starting from env
+    # avoids that; we add only what ggml-webgpu.cpp needs.
+    env_webgpu = env.Clone()
+    env_webgpu.Prepend(CPPPATH=all_inc)
+    env_webgpu.Append(CPPDEFINES=backend_defines)
+    # pre_wgsl.hpp uses throw; strip -fno-exceptions and enable WASM native EH.
+    env_webgpu["CXXFLAGS"] = [f for f in list(env_webgpu["CXXFLAGS"]) if f != "-fno-exceptions"] + ["-fwasm-exceptions"]
+    env_webgpu["CCFLAGS"] = list(env_webgpu["CCFLAGS"]) + ["--use-port=emdawnwebgpu", "-w"]
+    _wgpu_obj_root = Dir("#").abspath + "/bin/obj/modules/llm/" + _wgpu_src
+    env.modules_sources += env_webgpu.SharedObject(
+        _wgpu_obj_root + "ggml-webgpu",
+        _wgpu_src + "ggml-webgpu.cpp",
+    )
+
+# Add Vulkan per-shader generated .cpp files (produced by generate_vulkan_shaders).
+# These exist on disk after a previous generation pass; SCons picks them up here.
+if platform in ("linuxbsd", "windows", "android"):
+    _shader_cpps = get_generated_shader_cpps(_vk_spv_dir)
+    if _shader_cpps:
+        env_tp.add_source_files(env.modules_sources, _shader_cpps)
+
+
+# ── Explicit objects for colliding basename pairs ─────────────────────────────
+def build_explicit(src, suffix):
+    """Compile src with a unique object name (suffix disambiguates .c vs .cpp vs .m)."""
+    # Use absolute filesystem path to avoid SCons prepending the build dir twice.
+    root = Dir("#").abspath
+    target = root + "/bin/obj/modules/llm/" + tp + src.rsplit(".", 1)[0] + suffix
+    return env_tp.SharedObject(target, tp + src)
+
+
+# ggml-cpu/ggml-cpu — both .c and .cpp needed (not on web: no CPU backend)
+if platform != "web":
+    env.modules_sources += build_explicit("ggml/src/ggml-cpu/ggml-cpu.c", "-c")
+    env.modules_sources += build_explicit("ggml/src/ggml-cpu/ggml-cpu.cpp", "-cxx")
+
+# ggml-metal-device.cpp/.m — macOS and iOS
+if platform in ("macos", "ios"):
+    env.modules_sources += build_explicit("ggml/src/ggml-metal/ggml-metal-device.cpp", "-cxx")
+
+    # .m files use manual retain/release — compile without ARC
+    metal_src = tp + "ggml/src/ggml-metal/"
+    env_objc = env_tp.Clone()
+    env_objc.Append(CCFLAGS=["-fno-objc-arc"])
+    root = Dir("#").abspath
+    env.modules_sources += env_objc.SharedObject(
+        root + "/bin/obj/modules/llm/" + metal_src + "ggml-metal-context-objc",
+        metal_src + "ggml-metal-context.m",
+    )
+    env.modules_sources += env_objc.SharedObject(
+        root + "/bin/obj/modules/llm/" + metal_src + "ggml-metal-device-objc",
+        metal_src + "ggml-metal-device.m",
+    )
+
+# ── Module sources ────────────────────────────────────────────────────────────
+env_llm = env_modules.Clone()
+env_llm.Prepend(CPPPATH=all_inc)
+env_llm.Append(CPPDEFINES=backend_defines)
+if not env.msvc:
+    env_llm.Append(CCFLAGS=["-Wno-shadow"])  # ggml-backend.h: function name same as struct triggers -Wshadow
+env_llm.add_source_files(env.modules_sources, "*.cpp")
