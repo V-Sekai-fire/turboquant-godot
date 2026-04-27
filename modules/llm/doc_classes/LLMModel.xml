@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="LLMModel" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Loads a GGUF model file for in-process LLM inference.
+	</brief_description>
+	<description>
+		Wraps a llama.cpp [code]llama_model*[/code]. GPU acceleration is automatic and vendor-neutral via Vulkan on Linux, Windows, and Android (NVIDIA, AMD, Intel). macOS and iOS use Metal. Web builds run CPU-only.
+		[codeblocks]
+		[gdscript]
+		var model = LLMModel.new()
+		model.model_path = "/path/to/Qwen3.5-0.8B-heretic-Q4_K_M.gguf"
+		model.n_gpu_layers = -1  # -1 = all layers on GPU
+		model.load()
+		[/gdscript]
+		[/codeblocks]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="is_loaded" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the model is currently loaded.
+			</description>
+		</method>
+		<method name="load">
+			<return type="int" enum="Error" />
+			<description>
+				Loads the model from [member model_path]. Returns [constant OK] on success. If [member model_path] is empty, defaults to [code]~/.cache/llm/Qwen3.5-0.8B-heretic-Q4_K_M.gguf[/code].
+			</description>
+		</method>
+		<method name="unload">
+			<return type="void" />
+			<description>
+				Frees the loaded model and releases GPU/CPU memory.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="model_path" type="String" setter="set_model_path" getter="get_model_path" default="&quot;&quot;">
+			Path to the GGUF model file. Accepts absolute or [code]res://[/code] paths.
+		</member>
+		<member name="n_gpu_layers" type="int" setter="set_n_gpu_layers" getter="get_n_gpu_layers" default="-1">
+			Number of model layers to offload to GPU. [code]-1[/code] offloads all layers. Set to [code]0[/code] to force CPU-only inference.
+		</member>
+		<member name="use_mlock" type="bool" setter="set_use_mlock" getter="get_use_mlock" default="false">
+			Lock model weights in RAM to prevent them from being swapped out. Requires elevated permissions on some platforms.
+		</member>
+		<member name="use_mmap" type="bool" setter="set_use_mmap" getter="get_use_mmap" default="true">
+			Use memory-mapped file I/O for model loading. Reduces RAM usage when multiple processes share the same model file.
+		</member>
+	</members>
+	<signals>
+		<signal name="load_failed">
+			<param index="0" name="error" type="String" />
+			<description>
+				Emitted when model loading fails. [param error] contains the error message.
+			</description>
+		</signal>
+		<signal name="loaded">
+			<description>
+				Emitted when the model has been successfully loaded.
+			</description>
+		</signal>
+	</signals>
+</class>
