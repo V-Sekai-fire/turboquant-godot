@@ -32,11 +32,8 @@
 
 #include "core/error/error_macros.h"
 #include "core/object/class_db.h"
-#include "core/os/os.h"
 #include "core/variant/dictionary.h"
 
-#include "thirdparty/llama_cpp/common/common.h"
-#include "thirdparty/llama_cpp/common/sampling.h"
 #include "thirdparty/llama_cpp/include/llama.h"
 
 void LLMChat::_bind_methods() {
