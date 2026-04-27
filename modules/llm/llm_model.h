@@ -41,7 +41,7 @@
 //
 // GDScript:
 //   var model = LLMModel.new()
-//   model.model_path = "/path/to/Qwen3.5-0.8B-heretic-Q4_K_M.gguf"
+//   model.model_path = "/path/to/model.gguf"
 //   model.n_gpu_layers = -1  # -1 = all layers on GPU
 //   var err = model.load()
 class LLMModel : public RefCounted {
