@@ -41,7 +41,6 @@
 #include "core/string/ustring.h"
 #include "core/variant/array.h"
 
-#include "thirdparty/llama_cpp/common/sampling.h"
 #include "thirdparty/llama_cpp/include/llama.h"
 
 // High-level chat completion using in-process llama.cpp inference.
