@@ -6,8 +6,8 @@ import sys
 Import("env")
 Import("env_modules")
 
-tp = "thirdparty/llama_cpp/"
-tp_abs = "#" + tp  # absolute from project root (for CPPPATH)
+tp = "#thirdparty/llama_cpp/"
+tp_abs = tp  # absolute from project root (for CPPPATH)
 
 ggml_inc = [
     tp_abs + "ggml/include",
@@ -146,9 +146,9 @@ if platform in ("macos", "ios"):
     )
     # Embed Metal source as a C char array (metal_builders.py gen.cpp pattern).
     # Metal compiles it at runtime via newLibraryWithSource: — no xcrun needed.
-    _metal_dir = Dir("#modules/llm/" + metal_src).abspath + "/"
+    _metal_dir = Dir(metal_src).abspath + "/"
     _metal_src_file = _metal_dir + "ggml-metal.metal"
-    _metal_common = Dir("#modules/llm/" + tp + "ggml/src/").abspath + "/ggml-common.h"
+    _metal_common = Dir(tp_abs + "ggml/src/").abspath + "/ggml-common.h"
     _metal_impl = _metal_dir + "ggml-metal-impl.h"
     _embed_gen = Dir("#thirdparty/llama_cpp/ggml/src/ggml-metal").abspath + "/ggml-metal-embed.gen.cpp"
     env.Command(_embed_gen, [_metal_src_file, _metal_common, _metal_impl], generate_metal_embed)
@@ -161,7 +161,7 @@ if platform in ("linuxbsd", "windows", "android"):
     from vulkan_builders import generate_vulkan_shaders, get_generated_shader_cpps
 
     _vk_src = tp + "ggml/src/ggml-vulkan/"
-    _vk_abs = Dir("#modules/llm/" + _vk_src).abspath
+    _vk_abs = Dir(_vk_src).abspath
     _vk_spv_dir = _vk_abs + "/vulkan-shaders.spv"
     _vk_hpp = _vk_abs + "/ggml-vulkan-shaders.hpp"  # must match #include in ggml-vulkan.cpp
 
@@ -218,7 +218,7 @@ if platform == "web":
     from webgpu_builders import generate_webgpu_shaders
 
     _wgpu_src = tp + "ggml/src/ggml-webgpu/"
-    _wgpu_abs = Dir("#modules/llm/" + _wgpu_src).abspath
+    _wgpu_abs = Dir(_wgpu_src).abspath
     _wgpu_hpp = _wgpu_abs + "/ggml-wgsl-shaders.hpp"
 
     # Embed WGSL shaders at SCons reading phase so the header exists before compilation.
