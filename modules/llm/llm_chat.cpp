@@ -193,6 +193,8 @@ void LLMChat::_run_inference(const Array &p_messages) {
 	// Decode loop.
 	String full_response;
 	const llama_token eos = llama_vocab_eos(vocab);
+	// Buffer incomplete UTF-8 byte sequences that may span token boundaries.
+	PackedByteArray utf8_buf;
 
 	for (int i = 0; i < max_tokens; i++) {
 		llama_token token_id = llama_sampler_sample(sampler, lctx, -1);
@@ -207,16 +209,60 @@ void LLMChat::_run_inference(const Array &p_messages) {
 		if (piece_len < 0) {
 			continue;
 		}
-		piece_buf[piece_len] = '\0';
-		String token_str = String::utf8(piece_buf, piece_len);
-		full_response += token_str;
 
-		call_deferred("emit_signal", "token_generated", token_str);
+		for (int j = 0; j < piece_len; j++) {
+			utf8_buf.push_back((uint8_t)piece_buf[j]);
+		}
+
+		// Emit only complete UTF-8 sequences. A leading byte tells us the
+		// expected sequence length; if the buffer doesn't hold the full
+		// sequence yet, wait for the next token.
+		int emit_up_to = 0;
+		for (int j = 0; j < utf8_buf.size();) {
+			uint8_t b = utf8_buf[j];
+			int seq_len;
+			if (b < 0x80) {
+				seq_len = 1;
+			} else if ((b & 0xE0) == 0xC0) {
+				seq_len = 2;
+			} else if ((b & 0xF0) == 0xE0) {
+				seq_len = 3;
+			} else if ((b & 0xF8) == 0xF0) {
+				seq_len = 4;
+			} else {
+				// Invalid leading byte — skip it.
+				j++;
+				emit_up_to = j;
+				continue;
+			}
+			if (j + seq_len <= utf8_buf.size()) {
+				j += seq_len;
+				emit_up_to = j;
+			} else {
+				break; // Incomplete sequence — wait for more bytes.
+			}
+		}
+
+		if (emit_up_to > 0) {
+			String token_str = String::utf8((const char *)utf8_buf.ptr(), emit_up_to);
+			full_response += token_str;
+			call_deferred("emit_signal", "token_generated", token_str);
+			utf8_buf = utf8_buf.slice(emit_up_to, utf8_buf.size());
+		}
 
 		// Decode the new token.
 		llama_batch next = llama_batch_get_one(&token_id, 1);
 		if (llama_decode(lctx, next) != 0) {
 			break;
+		}
+	}
+
+	// Flush any remaining bytes (best-effort).
+	if (!utf8_buf.is_empty()) {
+		String remainder = String::utf8((const char *)utf8_buf.ptr(), utf8_buf.size());
+		if (!remainder.is_empty()) {
+			full_response += remainder;
+			call_deferred("emit_signal", "token_generated", remainder);
 		}
 	}
 
