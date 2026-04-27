@@ -36,7 +36,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 
-#include "modules/llm/thirdparty/llama_cpp/include/llama.h"
+#include "thirdparty/llama_cpp/include/llama.h"
 
 LLMModel::LLMModel() {
 	llama_backend_init();

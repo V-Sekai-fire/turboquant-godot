@@ -39,8 +39,8 @@
 #include "core/string/ustring.h"
 #include "core/variant/array.h"
 
-#include "modules/llm/thirdparty/llama_cpp/common/sampling.h"
-#include "modules/llm/thirdparty/llama_cpp/include/llama.h"
+#include "thirdparty/llama_cpp/common/sampling.h"
+#include "thirdparty/llama_cpp/include/llama.h"
 
 // High-level chat completion using in-process llama.cpp inference.
 // Runs on a worker thread; emits token_generated per token and

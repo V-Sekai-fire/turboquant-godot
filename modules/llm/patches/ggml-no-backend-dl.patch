@@ -24,10 +24,10 @@ index 62837c6c5d..ba123d43fc 100644
  if env.msvc:
      env_tp.Append(CCFLAGS=["/EHsc"])
      env_tp.Append(CXXFLAGS=[])
-diff --git a/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h b/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h
+diff --git a/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h b/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h
 index f74b7c9489..faf3e7283e 100644
---- a/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h
-+++ b/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h
+--- a/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h
++++ b/thirdparty/llama_cpp/ggml/src/ggml-backend-dl.h
 @@ -1,5 +1,7 @@
  #pragma once
  
@@ -42,10 +42,10 @@ index f74b7c9489..faf3e7283e 100644
  
 +#endif // GGML_BACKEND_DL
 +
-diff --git a/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp b/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp
+diff --git a/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp b/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp
 index 0587109212..641ee974e4 100644
---- a/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp
-+++ b/modules/llm/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp
+--- a/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp
++++ b/thirdparty/llama_cpp/ggml/src/ggml-backend-reg.cpp
 @@ -4,7 +4,9 @@
  #include "ggml-impl.h"
  #include <algorithm>
