@@ -30,10 +30,9 @@
 
 #pragma once
 
-#include <vector>
-
 #include "llm_context.h"
 #include "llm_model.h"
+#include <thirdparty/llama_cpp/include/llama.h>
 
 #include "core/object/ref_counted.h"
 #include "core/os/mutex.h"
@@ -41,7 +40,7 @@
 #include "core/string/ustring.h"
 #include "core/variant/array.h"
 
-#include "thirdparty/llama_cpp/include/llama.h"
+#include <vector>
 
 // High-level chat completion using in-process llama.cpp inference.
 // Runs on a worker thread; emits token_generated per token and

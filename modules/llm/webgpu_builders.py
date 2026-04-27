@@ -36,15 +36,13 @@ def generate_webgpu_shaders(wgpu_src_dir: str, hpp_path: str) -> None:
 
     os.makedirs(os.path.dirname(hpp_path), exist_ok=True)
 
-    subprocess.check_call(
-        [
-            sys.executable,
-            embed_script,
-            "--input_dir",
-            shader_dir,
-            "--output_file",
-            hpp_path,
-        ]
-    )
+    subprocess.check_call([
+        sys.executable,
+        embed_script,
+        "--input_dir",
+        shader_dir,
+        "--output_file",
+        hpp_path,
+    ])
 
     print(f"webgpu_builders: embedded WGSL shaders → {hpp_path}")

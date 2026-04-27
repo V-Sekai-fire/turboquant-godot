@@ -30,10 +30,10 @@
 
 #pragma once
 
+#include <thirdparty/llama_cpp/include/llama.h>
+
 #include "core/object/ref_counted.h"
 #include "core/string/ustring.h"
-
-#include "thirdparty/llama_cpp/include/llama.h"
 
 // Loads a GGUF model file into memory.
 // GPU acceleration is automatic: Metal on macOS, CUDA on Linux/Windows

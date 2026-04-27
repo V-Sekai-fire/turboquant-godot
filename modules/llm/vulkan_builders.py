@@ -93,35 +93,31 @@ def generate_vulkan_shaders(vk_src_dir: str, out_dir: str, hpp_path: str) -> Non
     glslc = _glslc_path(os.environ.get("GLSLC", ""))
 
     # 2. Generate the HPP header skeleton first
-    subprocess.check_call(
-        [
-            gen_binary,
-            "--output-dir",
-            out_dir,
-            "--target-hpp",
-            hpp_path,
-        ]
-    )
+    subprocess.check_call([
+        gen_binary,
+        "--output-dir",
+        out_dir,
+        "--target-hpp",
+        hpp_path,
+    ])
 
     # 3. Compile each .comp → SPIR-V → per-shader .cpp (also updates HPP)
     for comp in comp_files:
         name = os.path.basename(comp)
         target_cpp = os.path.join(out_dir, name + ".cpp")
-        subprocess.check_call(
-            [
-                gen_binary,
-                "--glslc",
-                glslc,
-                "--source",
-                comp,
-                "--output-dir",
-                out_dir,
-                "--target-hpp",
-                hpp_path,
-                "--target-cpp",
-                target_cpp,
-            ]
-        )
+        subprocess.check_call([
+            gen_binary,
+            "--glslc",
+            glslc,
+            "--source",
+            comp,
+            "--output-dir",
+            out_dir,
+            "--target-hpp",
+            hpp_path,
+            "--target-cpp",
+            target_cpp,
+        ])
 
     print(f"vulkan_builders: compiled {len(comp_files)} shaders → {hpp_path}")
 
@@ -184,16 +180,14 @@ def generate_mingw_vulkan_implib(vulkan_headers_include: str, out_dir: str) -> s
             "  apt install mingw-w64    (Linux)"
         )
 
-    subprocess.check_call(
-        [
-            dlltool,
-            "--dllname",
-            "vulkan-1.dll",
-            "--def",
-            out_def,
-            "--output-lib",
-            out_lib,
-        ]
-    )
+    subprocess.check_call([
+        dlltool,
+        "--dllname",
+        "vulkan-1.dll",
+        "--def",
+        out_def,
+        "--output-lib",
+        out_lib,
+    ])
     print(f"vulkan_builders: generated {out_lib} ({len(functions)} exports)")
     return out_lib

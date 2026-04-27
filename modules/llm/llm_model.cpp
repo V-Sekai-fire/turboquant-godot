@@ -30,12 +30,12 @@
 
 #include "llm_model.h"
 
+#include <thirdparty/llama_cpp/include/llama.h>
+
 #include "core/config/project_settings.h"
 #include "core/error/error_macros.h"
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
-
-#include "thirdparty/llama_cpp/include/llama.h"
 
 LLMModel::LLMModel() {
 	llama_backend_init();
