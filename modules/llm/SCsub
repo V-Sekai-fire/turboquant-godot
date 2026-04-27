@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# SCsub CWD = modules/llm/ — all tp paths are relative to here.
 from misc.utility.scons_hints import *
 
 import sys
@@ -8,7 +7,7 @@ Import("env")
 Import("env_modules")
 
 tp = "thirdparty/llama_cpp/"
-tp_abs = "#modules/llm/" + tp  # absolute from project root (for CPPPATH)
+tp_abs = "#" + tp  # absolute from project root (for CPPPATH)
 
 ggml_inc = [
     tp_abs + "ggml/include",
@@ -151,7 +150,7 @@ if platform in ("macos", "ios"):
     _metal_src_file = _metal_dir + "ggml-metal.metal"
     _metal_common = Dir("#modules/llm/" + tp + "ggml/src/").abspath + "/ggml-common.h"
     _metal_impl = _metal_dir + "ggml-metal-impl.h"
-    _embed_gen = Dir("#modules/llm/thirdparty/llama_cpp/ggml/src/ggml-metal").abspath + "/ggml-metal-embed.gen.cpp"
+    _embed_gen = Dir("#thirdparty/llama_cpp/ggml/src/ggml-metal").abspath + "/ggml-metal-embed.gen.cpp"
     env.Command(_embed_gen, [_metal_src_file, _metal_common, _metal_impl], generate_metal_embed)
     backend_sources += [_embed_gen]
     backend_defines += ["GGML_METAL_EMBED_LIBRARY"]
@@ -198,7 +197,7 @@ if platform in ("linuxbsd", "windows", "android"):
         if _is_cross and _sdk:
             from vulkan_builders import generate_mingw_vulkan_implib
 
-            _implib_dir = Dir("#modules/llm/thirdparty/llama_cpp/ggml/src/ggml-vulkan").abspath + "/mingw-implib"
+            _implib_dir = Dir("#thirdparty/llama_cpp/ggml/src/ggml-vulkan").abspath + "/mingw-implib"
             _implib = generate_mingw_vulkan_implib(_sdk + "/include", _implib_dir)
             # Pass the full .dll.a path directly — no sysroot modification needed
             env.Append(LINKFLAGS=[_implib])

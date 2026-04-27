@@ -35,8 +35,8 @@
 #include "core/object/ref_counted.h"
 #include "core/string/ustring.h"
 
-#include "modules/llm/thirdparty/llama_cpp/ggml/include/ggml.h"
-#include "modules/llm/thirdparty/llama_cpp/include/llama.h"
+#include "thirdparty/llama_cpp/ggml/include/ggml.h"
+#include "thirdparty/llama_cpp/include/llama.h"
 
 // Inference context wrapping llama_context*.
 // KV cache types are set via string: "f16", "q8_0", "q4_0", "turbo2", "turbo3", "turbo4"
