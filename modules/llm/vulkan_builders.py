@@ -75,13 +75,15 @@ def generate_vulkan_shaders(vk_src_dir: str, out_dir: str, hpp_path: str) -> Non
     shaders_dir = os.path.join(vk_src_dir, "vulkan-shaders")
     comp_files = sorted(glob.glob(os.path.join(shaders_dir, "*.comp")))
 
-    # Skip if hpp is newer than all .comp sources.
+    # Skip if hpp is newer than all .comp sources AND all output .comp.cpp exist.
     if os.path.exists(hpp_path):
-        hpp_mtime = os.path.getmtime(hpp_path)
-        gen_src = os.path.join(shaders_dir, "vulkan-shaders-gen.cpp")
-        newest_src = max(os.path.getmtime(f) for f in comp_files + [gen_src])
-        if hpp_mtime > newest_src:
-            return
+        expected_cpps = [os.path.join(out_dir, os.path.basename(c) + ".cpp") for c in comp_files]
+        if all(os.path.exists(p) for p in expected_cpps):
+            hpp_mtime = os.path.getmtime(hpp_path)
+            gen_src = os.path.join(shaders_dir, "vulkan-shaders-gen.cpp")
+            newest_src = max(os.path.getmtime(f) for f in comp_files + [gen_src])
+            if hpp_mtime > newest_src:
+                return
 
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(os.path.dirname(hpp_path), exist_ok=True)
