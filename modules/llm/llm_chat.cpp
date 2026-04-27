@@ -160,11 +160,12 @@ void LLMChat::_run_inference(const Array &p_messages) {
 	llama_context *lctx = context->get_llama_context();
 	llama_model *lmodel = model->get_llama_model();
 	const llama_vocab *vocab = llama_model_get_vocab(lmodel);
+	const uint32_t n_ctx = llama_n_ctx(lctx);
 
 	String prompt_str = _apply_chat_template(p_messages);
 	std::string prompt_std = prompt_str.utf8().get_data();
 
-	// Tokenize prompt.
+	// Tokenize full prompt.
 	std::vector<llama_token> prompt_tokens;
 	prompt_tokens.resize(prompt_std.size() + 16);
 	int n_prompt = llama_tokenize(vocab, prompt_std.c_str(), prompt_std.size(),
@@ -177,14 +178,42 @@ void LLMChat::_run_inference(const Array &p_messages) {
 	}
 	prompt_tokens.resize(n_prompt);
 
-	// Prefill.
-	llama_batch batch = llama_batch_get_one(prompt_tokens.data(), n_prompt);
-	if (llama_decode(lctx, batch) != 0) {
-		call_deferred("emit_signal", "inference_failed", "Prefill (llama_decode) failed.");
+	// If the prompt exceeds the context window, clear the cache and start fresh.
+	if ((uint32_t)n_prompt >= n_ctx) {
+		llama_memory_clear(llama_get_memory(lctx), true);
+		cached_tokens.clear();
+		call_deferred("emit_signal", "inference_failed", "Prompt exceeds context window.");
 		MutexLock lock(worker_mutex);
 		busy = false;
 		return;
 	}
+
+	// Find the longest common prefix between what is already in the KV cache
+	// and the new prompt, so we only prefill the novel suffix.
+	int n_match = 0;
+	int n_cached = (int)cached_tokens.size();
+	while (n_match < n_cached && n_match < n_prompt &&
+			cached_tokens[n_match] == prompt_tokens[n_match]) {
+		n_match++;
+	}
+
+	// Trim KV cache entries beyond the common prefix if the prompt diverged.
+	if (n_match < n_cached) {
+		llama_memory_seq_rm(llama_get_memory(lctx), 0, n_match, -1);
+		cached_tokens.resize(n_match);
+	}
+
+	// Prefill only the new tokens.
+	if (n_match < n_prompt) {
+		llama_batch batch = llama_batch_get_one(prompt_tokens.data() + n_match, n_prompt - n_match);
+		if (llama_decode(lctx, batch) != 0) {
+			call_deferred("emit_signal", "inference_failed", "Prefill (llama_decode) failed.");
+			MutexLock lock(worker_mutex);
+			busy = false;
+			return;
+		}
+	}
+	cached_tokens = prompt_tokens;
 
 	// Sampler setup.
 	llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
@@ -254,7 +283,8 @@ void LLMChat::_run_inference(const Array &p_messages) {
 			utf8_buf = utf8_buf.slice(emit_up_to, utf8_buf.size());
 		}
 
-		// Decode the new token.
+		// Track the generated token in the cache, then decode it.
+		cached_tokens.push_back(token_id);
 		llama_batch next = llama_batch_get_one(&token_id, 1);
 		if (llama_decode(lctx, next) != 0) {
 			break;
@@ -271,7 +301,7 @@ void LLMChat::_run_inference(const Array &p_messages) {
 	}
 
 	llama_sampler_free(sampler);
-	llama_memory_clear(llama_get_memory(lctx), true);
+	// KV cache is intentionally kept for the next turn (prefix reuse).
 
 	call_deferred("emit_signal", "response_received", full_response);
 
