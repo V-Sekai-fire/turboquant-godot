@@ -234,6 +234,11 @@ if platform in ("linuxbsd", "windows", "android"):
             env.Append(LIBS=["vulkan"])
 
 # Web uses CPU backend only — no GPU backend available in Emscripten.
+# llama.cpp uses try/catch/throw; add -fwasm-exceptions to the link step so
+# Emscripten doesn't set DISABLE_EXCEPTION_THROWING (which Godot's -fno-exceptions
+# would otherwise trigger) while llama.cpp object files still need __cxa_throw.
+if platform == "web":
+    env.Append(LINKFLAGS=["-fwasm-exceptions"])
 
 # ── Thirdparty build env ──────────────────────────────────────────────────────
 # llama.cpp uses try/catch/throw internally. Enable exceptions for vendored
