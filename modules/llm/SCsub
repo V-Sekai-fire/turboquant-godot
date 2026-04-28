@@ -278,6 +278,9 @@ env_tp.Append(
         # CPU backend required even on web: llama.cpp uses it for tensor buffer allocation
         # even when all compute runs on WebGPU.
         "GGML_USE_CPU",
+        # On wasm32, no x86/arm SIMD — select scalar fallbacks via arch-fallback.h
+        # (mirrors what upstream CMakeLists does for generic/non-SIMD platforms).
+        *(["GGML_CPU_GENERIC"] if env["platform"] == "web" else []),
         # cmake-generated version strings
         'GGML_VERSION=\\"0.10.0\\"',
         'GGML_COMMIT=\\"turboquant-kv-cache\\"',
