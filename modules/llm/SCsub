@@ -62,19 +62,20 @@ if True:  # CPU backend needed on all platforms including web for tensor buffer 
         ggml_cpu_src + "vec.cpp",
     ]
 
-    # Architecture-specific CPU implementations
-    _target_arch = env.get("arch", "")
-    _is_arm = _target_arch in ("arm64", "arm32", "armv7") or env["platform"] == "android"
-    if _is_arm:
-        ggml_cpu_sources += [
-            ggml_cpu_src + "arch/arm/quants.c",
-            ggml_cpu_src + "arch/arm/repack.cpp",
-            ggml_cpu_src + "arch/arm/cpu-feats.cpp",
-        ]
-    else:
-        ggml_cpu_sources += [
-            ggml_cpu_src + "arch/x86/quants.c",
-        ] + list(Glob(ggml_cpu_src + "arch/x86/*.cpp"))
+    # Architecture-specific CPU implementations (not on web: wasm32 has no x86/arm SIMD)
+    if platform != "web":
+        _target_arch = env.get("arch", "")
+        _is_arm = _target_arch in ("arm64", "arm32", "armv7") or env["platform"] == "android"
+        if _is_arm:
+            ggml_cpu_sources += [
+                ggml_cpu_src + "arch/arm/quants.c",
+                ggml_cpu_src + "arch/arm/repack.cpp",
+                ggml_cpu_src + "arch/arm/cpu-feats.cpp",
+            ]
+        else:
+            ggml_cpu_sources += [
+                ggml_cpu_src + "arch/x86/quants.c",
+            ] + list(Glob(ggml_cpu_src + "arch/x86/*.cpp"))
 
 # ── llama.cpp core ────────────────────────────────────────────────────────────
 llama_sources = list(Glob(tp + "src/models/*.cpp")) + [
