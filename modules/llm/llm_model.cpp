@@ -36,10 +36,8 @@
 #include "core/error/error_macros.h"
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
-#include "core/os/thread.h"
 
 LLMModel::LLMModel() {
-	llama_backend_init();
 }
 
 LLMModel::~LLMModel() {
