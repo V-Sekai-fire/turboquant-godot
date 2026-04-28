@@ -49,7 +49,7 @@ ggml_cpp_sources = [
 ggml_cpu_src = tp + "ggml/src/ggml-cpu/"
 ggml_cpu_sources = []
 
-if env["platform"] != "web":
+if True:  # CPU backend needed on all platforms including web for tensor buffer allocation
     ggml_cpu_sources = [
         # ggml-cpu.c and ggml-cpu.cpp handled below via explicit objects
         ggml_cpu_src + "binary-ops.cpp",
@@ -255,8 +255,9 @@ env_tp.Append(
     CPPDEFINES=[
         "GGML_USE_LLAMAFILE=0",
         "LLAMA_BUILD",
-        # GGML_USE_CPU omitted on web — WebGPU is the only backend; no CPU kernels compiled
-        *([] if env["platform"] == "web" else ["GGML_USE_CPU"]),
+        # CPU backend required even on web: llama.cpp uses it for tensor buffer allocation
+        # even when all compute runs on WebGPU.
+        "GGML_USE_CPU",
         # cmake-generated version strings
         'GGML_VERSION=\\"0.10.0\\"',
         'GGML_COMMIT=\\"turboquant-kv-cache\\"',
@@ -336,10 +337,9 @@ def build_explicit(src, suffix):
     return env_tp.SharedObject(target, tp + src)
 
 
-# ggml-cpu/ggml-cpu — both .c and .cpp needed (not on web: no CPU backend)
-if platform != "web":
-    env.modules_sources += build_explicit("ggml/src/ggml-cpu/ggml-cpu.c", "-c")
-    env.modules_sources += build_explicit("ggml/src/ggml-cpu/ggml-cpu.cpp", "-cxx")
+# ggml-cpu/ggml-cpu — needed on all platforms for tensor buffer allocation
+env.modules_sources += build_explicit("ggml/src/ggml-cpu/ggml-cpu.c", "-c")
+env.modules_sources += build_explicit("ggml/src/ggml-cpu/ggml-cpu.cpp", "-cxx")
 
 # ggml-metal-device.cpp/.m — macOS and iOS
 if platform in ("macos", "ios"):
