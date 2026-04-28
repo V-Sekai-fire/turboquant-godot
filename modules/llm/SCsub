@@ -49,7 +49,21 @@ ggml_cpp_sources = [
 ggml_cpu_src = tp + "ggml/src/ggml-cpu/"
 ggml_cpu_sources = []
 
-if True:  # CPU backend needed on all platforms including web for tensor buffer allocation
+if env["platform"] == "web":
+    # Web (wasm32): CPU backend only needed for tensor buffer registration.
+    # quants.c in ggml-cpu/ requires arch-specific SIMD symbols not present on
+    # wasm32; ggml/src/ggml-quants.c (in ggml_c_sources) satisfies ggml-cpu.c's
+    # quant function references. Only compile the non-quant CPU backend files.
+    ggml_cpu_sources = [
+        ggml_cpu_src + "binary-ops.cpp",
+        ggml_cpu_src + "hbm.cpp",
+        ggml_cpu_src + "ops.cpp",
+        ggml_cpu_src + "repack.cpp",
+        ggml_cpu_src + "traits.cpp",
+        ggml_cpu_src + "unary-ops.cpp",
+        ggml_cpu_src + "vec.cpp",
+    ]
+else:
     ggml_cpu_sources = [
         # ggml-cpu.c and ggml-cpu.cpp handled below via explicit objects
         ggml_cpu_src + "binary-ops.cpp",
@@ -62,20 +76,19 @@ if True:  # CPU backend needed on all platforms including web for tensor buffer 
         ggml_cpu_src + "vec.cpp",
     ]
 
-    # Architecture-specific CPU implementations (not on web: wasm32 has no x86/arm SIMD)
-    if env["platform"] != "web":
-        _target_arch = env.get("arch", "")
-        _is_arm = _target_arch in ("arm64", "arm32", "armv7") or env["platform"] == "android"
-        if _is_arm:
-            ggml_cpu_sources += [
-                ggml_cpu_src + "arch/arm/quants.c",
-                ggml_cpu_src + "arch/arm/repack.cpp",
-                ggml_cpu_src + "arch/arm/cpu-feats.cpp",
-            ]
-        else:
-            ggml_cpu_sources += [
-                ggml_cpu_src + "arch/x86/quants.c",
-            ] + list(Glob(ggml_cpu_src + "arch/x86/*.cpp"))
+    # Architecture-specific CPU implementations
+    _target_arch = env.get("arch", "")
+    _is_arm = _target_arch in ("arm64", "arm32", "armv7") or env["platform"] == "android"
+    if _is_arm:
+        ggml_cpu_sources += [
+            ggml_cpu_src + "arch/arm/quants.c",
+            ggml_cpu_src + "arch/arm/repack.cpp",
+            ggml_cpu_src + "arch/arm/cpu-feats.cpp",
+        ]
+    else:
+        ggml_cpu_sources += [
+            ggml_cpu_src + "arch/x86/quants.c",
+        ] + list(Glob(ggml_cpu_src + "arch/x86/*.cpp"))
 
 # ── llama.cpp core ────────────────────────────────────────────────────────────
 llama_sources = list(Glob(tp + "src/models/*.cpp")) + [
