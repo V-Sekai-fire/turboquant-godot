@@ -103,6 +103,9 @@ public:
 
 	bool is_busy() const;
 
+	// Clear KV cache and conversation prefix so the next complete() starts fresh.
+	void reset();
+
 	// Async. Emits token_generated(token) and response_received(text).
 	void complete(const Array &p_messages);
 

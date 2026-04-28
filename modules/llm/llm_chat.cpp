@@ -42,6 +42,7 @@
 void LLMChat::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "model", "context"), &LLMChat::setup);
 	ClassDB::bind_method(D_METHOD("complete", "messages"), &LLMChat::complete);
+	ClassDB::bind_method(D_METHOD("reset"), &LLMChat::reset);
 	ClassDB::bind_method(D_METHOD("is_busy"), &LLMChat::is_busy);
 
 	ClassDB::bind_method(D_METHOD("set_max_tokens", "v"), &LLMChat::set_max_tokens);
@@ -130,6 +131,15 @@ void LLMChat::complete(const Array &p_messages) {
 	busy = true;
 
 	worker.start(_worker_func, job);
+}
+
+void LLMChat::reset() {
+	MutexLock lock(worker_mutex);
+	ERR_FAIL_COND_MSG(busy, "LLMChat: cannot reset while inference is in progress.");
+	if (context.is_valid() && context->is_valid()) {
+		llama_memory_clear(llama_get_memory(context->get_llama_context()), true);
+	}
+	cached_tokens.clear();
 }
 
 void LLMChat::_worker_func(void *p_data) {
