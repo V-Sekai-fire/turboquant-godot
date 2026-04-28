@@ -95,6 +95,8 @@ void LLMModel::_do_load() {
 		String imported = ResourceFormatImporter::get_singleton()->get_internal_resource_path(model_path);
 		resolved = ProjectSettings::get_singleton()->globalize_path(
 				imported.is_empty() ? model_path : imported);
+	} else if (model_path.begins_with("user://")) {
+		resolved = ProjectSettings::get_singleton()->globalize_path(model_path);
 	}
 
 	llama_model_params params = llama_model_default_params();
