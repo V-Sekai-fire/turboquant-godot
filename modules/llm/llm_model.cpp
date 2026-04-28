@@ -37,10 +37,6 @@
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
 
-#ifdef WEB_ENABLED
-#include "core/io/file_access.h"
-#include <cstdio>
-#endif
 
 LLMModel::LLMModel() {
 }
@@ -104,32 +100,7 @@ void LLMModel::_do_load() {
 	params.use_mmap = use_mmap;
 	params.use_mlock = use_mlock;
 
-	llama_model *loaded = nullptr;
-
-#ifdef __EMSCRIPTEN__
-	// On web, user:// maps to Emscripten IDBFS which may not be reachable via
-	// raw POSIX fopen() from a worker thread. Read through Godot's FileAccess
-	// (which handles the VFS correctly) and feed the bytes to llama.cpp via
-	// fmemopen so llama_model_load_from_file_ptr gets a valid FILE*.
-	{
-		Ref<FileAccess> fa = FileAccess::open(model_path, FileAccess::READ);
-		if (fa.is_valid()) {
-			uint64_t fsize = fa->get_length();
-			Vector<uint8_t> buf;
-			buf.resize(fsize);
-			fa->get_buffer(buf.ptrw(), fsize);
-			fa.unref();
-			params.use_mmap = false; // fmemopen FILE* cannot be mmap'd
-			FILE *fp = fmemopen(buf.ptrw(), fsize, "rb");
-			if (fp) {
-				loaded = llama_model_load_from_file_ptr(fp, params);
-				fclose(fp);
-			}
-		}
-	}
-#else
-	loaded = llama_model_load_from_file(resolved.utf8().get_data(), params);
-#endif
+	llama_model *loaded = llama_model_load_from_file(resolved.utf8().get_data(), params);
 
 	MutexLock lock(worker_mutex);
 	loading = false;
