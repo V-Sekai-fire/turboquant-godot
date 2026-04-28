@@ -223,6 +223,8 @@ if platform in ("linuxbsd", "windows", "android"):
             env.Append(LINKFLAGS=[_implib])
         else:
             env.Append(LINKFLAGS=["vulkan-1.lib"])  # bypass Godot's LIBSUFFIX mangling
+            if _sdk:
+                env.Append(LIBPATH=[_sdk + "/Lib"])
 
     else:
         # Linux: link libvulkan via SDK path
