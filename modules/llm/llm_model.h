@@ -30,12 +30,12 @@
 
 #pragma once
 
-#include <thirdparty/llama_cpp/include/llama.h>
-
 #include "core/object/ref_counted.h"
 #include "core/os/mutex.h"
 #include "core/os/thread.h"
 #include "core/string/ustring.h"
+
+#include <thirdparty/llama_cpp/include/llama.h>
 
 // Loads a GGUF model file into memory asynchronously.
 // Call load() then await the loaded or load_failed signal.

@@ -30,11 +30,11 @@
 
 #include "llm_chat.h"
 
-#include <thirdparty/llama_cpp/include/llama.h>
-
 #include "core/error/error_macros.h"
 #include "core/object/class_db.h"
 #include "core/variant/dictionary.h"
+
+#include <thirdparty/llama_cpp/include/llama.h>
 
 #include <string>
 #include <vector>

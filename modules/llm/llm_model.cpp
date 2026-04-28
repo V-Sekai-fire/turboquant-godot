@@ -30,17 +30,16 @@
 
 #include "llm_model.h"
 
-#include <thirdparty/llama_cpp/include/llama.h>
-
 #include "core/config/project_settings.h"
 #include "core/error/error_macros.h"
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
 
+#include <thirdparty/llama_cpp/include/llama.h>
+
 #ifdef WEB_ENABLED
 #include <cstdio>
 #endif
-
 
 LLMModel::LLMModel() {
 }
@@ -77,14 +76,30 @@ void LLMModel::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("load_failed", PropertyInfo(Variant::STRING, "error")));
 }
 
-void LLMModel::set_model_path(const String &p_path) { model_path = p_path; }
-String LLMModel::get_model_path() const { return model_path; }
-void LLMModel::set_n_gpu_layers(int p_layers) { n_gpu_layers = p_layers; }
-int LLMModel::get_n_gpu_layers() const { return n_gpu_layers; }
-void LLMModel::set_use_mmap(bool p_enabled) { use_mmap = p_enabled; }
-bool LLMModel::get_use_mmap() const { return use_mmap; }
-void LLMModel::set_use_mlock(bool p_enabled) { use_mlock = p_enabled; }
-bool LLMModel::get_use_mlock() const { return use_mlock; }
+void LLMModel::set_model_path(const String &p_path) {
+	model_path = p_path;
+}
+String LLMModel::get_model_path() const {
+	return model_path;
+}
+void LLMModel::set_n_gpu_layers(int p_layers) {
+	n_gpu_layers = p_layers;
+}
+int LLMModel::get_n_gpu_layers() const {
+	return n_gpu_layers;
+}
+void LLMModel::set_use_mmap(bool p_enabled) {
+	use_mmap = p_enabled;
+}
+bool LLMModel::get_use_mmap() const {
+	return use_mmap;
+}
+void LLMModel::set_use_mlock(bool p_enabled) {
+	use_mlock = p_enabled;
+}
+bool LLMModel::get_use_mlock() const {
+	return use_mlock;
+}
 
 void LLMModel::_load_thread(void *p_userdata) {
 	static_cast<LLMModel *>(p_userdata)->_do_load();
@@ -178,5 +193,9 @@ void LLMModel::unload() {
 	}
 }
 
-bool LLMModel::is_loaded() const { return model != nullptr; }
-bool LLMModel::is_loading() const { return loading; }
+bool LLMModel::is_loaded() const {
+	return model != nullptr;
+}
+bool LLMModel::is_loading() const {
+	return loading;
+}

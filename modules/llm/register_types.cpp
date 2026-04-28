@@ -34,9 +34,9 @@
 #include "llm_context.h"
 #include "llm_model.h"
 
-#include <thirdparty/llama_cpp/include/llama.h>
-
 #include "core/object/class_db.h"
+
+#include <thirdparty/llama_cpp/include/llama.h>
 
 #ifdef TOOLS_ENABLED
 #include "resource_importer_gguf.h"

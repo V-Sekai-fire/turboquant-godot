@@ -89,16 +89,36 @@ void LLMContext::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("create_failed", PropertyInfo(Variant::STRING, "error")));
 }
 
-void LLMContext::set_n_ctx(int p_n_ctx) { n_ctx = p_n_ctx; }
-int LLMContext::get_n_ctx() const { return n_ctx; }
-void LLMContext::set_n_threads(int p_threads) { n_threads = p_threads; }
-int LLMContext::get_n_threads() const { return n_threads; }
-void LLMContext::set_flash_attn(bool p_enabled) { flash_attn = p_enabled; }
-bool LLMContext::get_flash_attn() const { return flash_attn; }
-void LLMContext::set_cache_type_k(const String &p_type) { cache_type_k = p_type; }
-String LLMContext::get_cache_type_k() const { return cache_type_k; }
-void LLMContext::set_cache_type_v(const String &p_type) { cache_type_v = p_type; }
-String LLMContext::get_cache_type_v() const { return cache_type_v; }
+void LLMContext::set_n_ctx(int p_n_ctx) {
+	n_ctx = p_n_ctx;
+}
+int LLMContext::get_n_ctx() const {
+	return n_ctx;
+}
+void LLMContext::set_n_threads(int p_threads) {
+	n_threads = p_threads;
+}
+int LLMContext::get_n_threads() const {
+	return n_threads;
+}
+void LLMContext::set_flash_attn(bool p_enabled) {
+	flash_attn = p_enabled;
+}
+bool LLMContext::get_flash_attn() const {
+	return flash_attn;
+}
+void LLMContext::set_cache_type_k(const String &p_type) {
+	cache_type_k = p_type;
+}
+String LLMContext::get_cache_type_k() const {
+	return cache_type_k;
+}
+void LLMContext::set_cache_type_v(const String &p_type) {
+	cache_type_v = p_type;
+}
+String LLMContext::get_cache_type_v() const {
+	return cache_type_v;
+}
 
 void LLMContext::_create_thread(void *p_userdata) {
 	static_cast<LLMContext *>(p_userdata)->_do_create();
@@ -158,5 +178,9 @@ void LLMContext::destroy() {
 	}
 }
 
-bool LLMContext::is_valid() const { return ctx != nullptr; }
-bool LLMContext::is_creating() const { return creating; }
+bool LLMContext::is_valid() const {
+	return ctx != nullptr;
+}
+bool LLMContext::is_creating() const {
+	return creating;
+}
