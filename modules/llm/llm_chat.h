@@ -39,6 +39,8 @@
 #include "core/string/ustring.h"
 #include "core/variant/array.h"
 
+#include <atomic>
+
 #include <thirdparty/llama_cpp/include/llama.h>
 
 #include <vector>
@@ -69,6 +71,9 @@ class LLMChat : public RefCounted {
 	Thread worker;
 	Mutex worker_mutex;
 	bool busy = false;
+	// Erlang-style exit signal: set by cancel(), checked at every token boundary.
+	// The worker exits cleanly at the next reduction point rather than being killed.
+	std::atomic<bool> abort_flag { false };
 
 	// Tokens currently prefilled in the KV cache. Persisted across turns so
 	// each complete() only prefills the new suffix rather than the full prompt.
@@ -104,7 +109,14 @@ public:
 
 	bool is_busy() const;
 
+	// Send an exit signal to the running inference worker (Erlang-style).
+	// Returns immediately; the worker checks abort_flag at each token boundary
+	// and exits at the next reduction point. After cancel() the worker will
+	// clear busy, allowing reset() to be called safely.
+	void cancel();
+
 	// Clear KV cache and conversation prefix so the next complete() starts fresh.
+	// Must not be called while busy (call cancel() first and wait for is_busy() == false).
 	void reset();
 
 	// Async. Emits token_generated(token) and response_received(text).
