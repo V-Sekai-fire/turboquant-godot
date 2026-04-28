@@ -30,7 +30,9 @@ all_inc = ggml_inc + llama_inc + ["#modules/llm/compat"]  # spirv-headers/ shim 
 ggml_c_sources = [
     tp + "ggml/src/ggml.c",  # keep .c; ggml.cpp is a 26-line terminate handler
     tp + "ggml/src/ggml-alloc.c",
-    tp + "ggml/src/ggml-quants.c",
+    # ggml-quants.c omitted when CPU backend is active: ggml-cpu/quants.c owns
+    # these symbols (scalar fallbacks on wasm32, SIMD dispatch elsewhere).
+    # Included only when the CPU backend is not compiled (was: web-only build).
     tp + "ggml/src/ggml-turbo-quant.c",
 ]
 
@@ -50,14 +52,15 @@ ggml_cpu_src = tp + "ggml/src/ggml-cpu/"
 ggml_cpu_sources = []
 
 if env["platform"] == "web":
-    # Web (wasm32): CPU backend only needed for tensor buffer registration.
-    # quants.c in ggml-cpu/ requires arch-specific SIMD symbols not present on
-    # wasm32; ggml/src/ggml-quants.c (in ggml_c_sources) satisfies ggml-cpu.c's
-    # quant function references. Only compile the non-quant CPU backend files.
+    # Web (wasm32): include quants.c from ggml-cpu/ — on wasm32 with no SIMD
+    # defines it compiles to scalar fallbacks. ggml/src/ggml-quants.c is omitted
+    # from ggml_c_sources above to avoid duplicate symbol conflicts.
+    # No arch-specific files: wasm32 has no x86/arm SIMD.
     ggml_cpu_sources = [
         ggml_cpu_src + "binary-ops.cpp",
         ggml_cpu_src + "hbm.cpp",
         ggml_cpu_src + "ops.cpp",
+        ggml_cpu_src + "quants.c",
         ggml_cpu_src + "repack.cpp",
         ggml_cpu_src + "traits.cpp",
         ggml_cpu_src + "unary-ops.cpp",
