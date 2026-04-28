@@ -39,10 +39,9 @@
 #include "core/string/ustring.h"
 #include "core/variant/array.h"
 
-#include <atomic>
-
 #include <thirdparty/llama_cpp/include/llama.h>
 
+#include <atomic>
 #include <vector>
 
 // High-level chat completion using in-process llama.cpp inference.
@@ -73,7 +72,7 @@ class LLMChat : public RefCounted {
 	bool busy = false;
 	// Erlang-style exit signal: set by cancel(), checked at every token boundary.
 	// The worker exits cleanly at the next reduction point rather than being killed.
-	std::atomic<bool> abort_flag { false };
+	std::atomic<bool> abort_flag{ false };
 
 	// Tokens currently prefilled in the KV cache. Persisted across turns so
 	// each complete() only prefills the new suffix rather than the full prompt.
