@@ -70,7 +70,6 @@ void LLMContext::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cache_type_k"), &LLMContext::get_cache_type_k);
 	ClassDB::bind_method(D_METHOD("set_cache_type_v", "type"), &LLMContext::set_cache_type_v);
 	ClassDB::bind_method(D_METHOD("get_cache_type_v"), &LLMContext::get_cache_type_v);
-	ClassDB::bind_method(D_METHOD("_do_create_deferred"), &LLMContext::_do_create);
 	ClassDB::bind_method(D_METHOD("create", "model"), &LLMContext::create);
 	ClassDB::bind_method(D_METHOD("destroy"), &LLMContext::destroy);
 	ClassDB::bind_method(D_METHOD("is_valid"), &LLMContext::is_valid);
@@ -127,17 +126,9 @@ void LLMContext::_do_create() {
 		}
 	}
 	if (created == nullptr) {
-#ifdef WEB_ENABLED
-		emit_signal("create_failed", String("LLMContext: llama_init_from_model failed."));
-#else
 		call_deferred("emit_signal", "create_failed", String("LLMContext: llama_init_from_model failed."));
-#endif
 	} else {
-#ifdef WEB_ENABLED
-		emit_signal("created");
-#else
 		call_deferred("emit_signal", "created");
-#endif
 	}
 }
 
@@ -152,14 +143,10 @@ Error LLMContext::create(Ref<LLMModel> p_model) {
 	}
 	pending_model = p_model;
 	creating = true;
-#ifdef WEB_ENABLED
-	call_deferred("_do_create_deferred");
-#else
 	if (worker.is_started()) {
 		worker.wait_to_finish();
 	}
 	worker.start(_create_thread, this);
-#endif
 	return OK;
 }
 

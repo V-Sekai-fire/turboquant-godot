@@ -63,7 +63,6 @@ void LLMModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_use_mlock"), &LLMModel::get_use_mlock);
 	ClassDB::bind_method(D_METHOD("load"), &LLMModel::load);
 	ClassDB::bind_method(D_METHOD("load_from_buffer", "data"), &LLMModel::load_from_buffer);
-	ClassDB::bind_method(D_METHOD("_do_load_deferred"), &LLMModel::_do_load);
 	ClassDB::bind_method(D_METHOD("unload"), &LLMModel::unload);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &LLMModel::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_loading"), &LLMModel::is_loading);
@@ -134,18 +133,9 @@ void LLMModel::_do_load() {
 		}
 	}
 	if (loaded == nullptr) {
-		String err = "LLMModel: failed to load model from " + model_path;
-#ifdef WEB_ENABLED
-		emit_signal("load_failed", err);
-#else
-		call_deferred("emit_signal", "load_failed", err);
-#endif
+		call_deferred("emit_signal", "load_failed", String("LLMModel: failed to load model from ") + model_path);
 	} else {
-#ifdef WEB_ENABLED
-		emit_signal("loaded");
-#else
 		call_deferred("emit_signal", "loaded");
-#endif
 	}
 }
 
@@ -155,17 +145,10 @@ Error LLMModel::load() {
 	ERR_FAIL_COND_V_MSG(loading, ERR_BUSY, "LLMModel: already loading.");
 	ERR_FAIL_COND_V_MSG(model != nullptr, ERR_ALREADY_IN_USE, "LLMModel: model is already loaded.");
 	loading = true;
-#ifdef WEB_ENABLED
-	// WebGPU device/queue JS objects are main-thread-only; wgpuQueueWriteBuffer
-	// fails in worker threads. Run on the main thread via call_deferred —
-	// wgpuQueueWriteBuffer is non-blocking so stutter is minimal.
-	call_deferred("_do_load_deferred");
-#else
 	if (worker.is_started()) {
 		worker.wait_to_finish();
 	}
 	worker.start(_load_thread, this);
-#endif
 	return OK;
 }
 
@@ -180,14 +163,10 @@ Error LLMModel::load_from_buffer(const PackedByteArray &p_data) {
 	model_data.resize(p_data.size());
 	memcpy(model_data.ptrw(), p_data.ptr(), p_data.size());
 	loading = true;
-#ifdef WEB_ENABLED
-	call_deferred("_do_load_deferred");
-#else
 	if (worker.is_started()) {
 		worker.wait_to_finish();
 	}
 	worker.start(_load_thread, this);
-#endif
 	return OK;
 }
 

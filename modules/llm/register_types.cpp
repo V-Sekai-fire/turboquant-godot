@@ -34,7 +34,6 @@
 #include "llm_context.h"
 #include "llm_model.h"
 
-#include <thirdparty/llama_cpp/ggml/include/ggml-backend.h>
 #include <thirdparty/llama_cpp/include/llama.h>
 
 #include "core/object/class_db.h"
@@ -50,13 +49,7 @@ void initialize_llm_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 
-	// Force ggml backend registry initialization here, during Godot's module
-	// setup (inside main()), so it runs within the WebAssembly.promising context.
-	// On web with emdawnwebgpu, ggml_backend_webgpu_reg() calls wgpuInstanceWaitAny
-	// which is a JSPI suspending function — it must run inside main(), not from a
-	// requestAnimationFrame callback (which is outside the promising context).
 	llama_backend_init();
-	ggml_backend_reg_count();
 
 	GDREGISTER_CLASS(LLMModel);
 	GDREGISTER_CLASS(LLMContext);

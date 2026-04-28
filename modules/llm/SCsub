@@ -233,38 +233,7 @@ if platform in ("linuxbsd", "windows", "android"):
             print("  Pass vulkan_sdk_path=/path/to/sdk to scons, or set VULKAN_SDK.")
             env.Append(LIBS=["vulkan"])
 
-# ── WebGPU: web (Emscripten + emdawnwebgpu port) ─────────────────────────────
-if platform == "web":
-    from webgpu_builders import generate_webgpu_shaders
-
-    _wgpu_src = tp + "ggml/src/ggml-webgpu/"
-    _wgpu_abs = Dir(_wgpu_src).abspath
-    _wgpu_hpp = _wgpu_abs + "/ggml-wgsl-shaders.hpp"
-
-    # Embed WGSL shaders at SCons reading phase so the header exists before compilation.
-    generate_webgpu_shaders(_wgpu_abs, _wgpu_hpp)
-
-    # ggml-webgpu.cpp is compiled separately below with a dedicated env so that
-    # --use-port=emdawnwebgpu (which forces -enable-emscripten-sjlj) is NOT
-    # applied globally. Spreading it via env.CCFLAGS causes a clang error on every
-    # other file that also gets -fexceptions:
-    #   invalid argument '-wasm-enable-sjlj' not allowed with
-    #   '-enable-emscripten-cxx-exceptions'
-    backend_defines += ["GGML_USE_WEBGPU"]
-    all_inc += [_wgpu_abs]
-
-    # Godot's detect.py sets -sSUPPORT_LONGJMP='wasm' unconditionally, which
-    # forces -wasm-enable-sjlj on every TU. -fexceptions would add
-    # -enable-emscripten-cxx-exceptions on the same TU → conflict.
-    # Only -fwasm-exceptions (WASM native EH) is compatible with WASM SjLj.
-    # Signal env_tp (below) to use it, and add the runtime to the link step.
-    env["_llm_web_wasm_eh"] = True
-
-    # Link: emdawnwebgpu JS runtime + WASM EH runtime + JSPI async.
-    # ASYNCIFY=1 (bytecode transform) is incompatible with -fwasm-exceptions; use
-    # ASYNCIFY=2 (JSPI) instead — the browser engine suspends/resumes the wasm stack
-    # natively, no bytecode rewriting, compatible with wasm-exceptions and WebGPU.
-    env.Append(LINKFLAGS=["--use-port=emdawnwebgpu", "-fwasm-exceptions", "-sASYNCIFY=2"])
+# Web uses CPU backend only — no GPU backend available in Emscripten.
 
 # ── Thirdparty build env ──────────────────────────────────────────────────────
 # llama.cpp uses try/catch/throw internally. Enable exceptions for vendored
@@ -297,7 +266,7 @@ else:
     env_tp["CXXFLAGS"] = [f for f in env_tp["CXXFLAGS"] if f != "-fno-exceptions"]
     # Godot's web build sets -sSUPPORT_LONGJMP='wasm' (WASM SjLj) unconditionally.
     # -fexceptions (Emscripten JS EH) conflicts with it; -fwasm-exceptions does not.
-    _exc_flag = "-fwasm-exceptions" if env.get("_llm_web_wasm_eh") else "-fexceptions"
+    _exc_flag = "-fwasm-exceptions" if platform == "web" else "-fexceptions"
     compat_h = Dir(".").abspath + "/llama_compat.h"
     # getenv/atoi not in scope on Emscripten or Android without explicit pull-in
     _stdlib_extras = ["-include", "cstdlib"] if platform in ("web", "android") else []
@@ -320,28 +289,6 @@ env_tp.add_source_files(
     ggml_c_sources + ggml_cpp_sources + ggml_cpu_sources + llama_sources + common_sources + backend_sources,
 )
 
-# ── WebGPU dedicated compilation ──────────────────────────────────────────────
-# ggml-webgpu.cpp must be compiled with --use-port=emdawnwebgpu so the compiler
-# finds <webgpu/webgpu_cpp.h>. The port forces -enable-emscripten-sjlj which
-# conflicts with -fexceptions on the same TU, so we use -fno-exceptions here
-# (the webgpu backend itself doesn't throw). All other env_tp files are unaffected.
-if platform == "web":
-    # Build from env (not env_tp) to guarantee a fresh CCFLAGS list.
-    # env_tp.Clone().Append() shares the underlying SCons CLVar and mutates
-    # env_tp's CCFLAGS in-place, spreading --use-port=emdawnwebgpu (and its
-    # forced -enable-emscripten-sjlj) to every other TU. Starting from env
-    # avoids that; we add only what ggml-webgpu.cpp needs.
-    env_webgpu = env.Clone()
-    env_webgpu.Prepend(CPPPATH=all_inc)
-    env_webgpu.Append(CPPDEFINES=backend_defines)
-    # pre_wgsl.hpp uses throw; strip -fno-exceptions and enable WASM native EH.
-    env_webgpu["CXXFLAGS"] = [f for f in list(env_webgpu["CXXFLAGS"]) if f != "-fno-exceptions"] + ["-fwasm-exceptions"]
-    env_webgpu["CCFLAGS"] = list(env_webgpu["CCFLAGS"]) + ["--use-port=emdawnwebgpu", "-w"]
-    _wgpu_obj_root = Dir("#").abspath + "/bin/obj/modules/llm/" + _wgpu_src
-    env.modules_sources += env_webgpu.SharedObject(
-        _wgpu_obj_root + "ggml-webgpu",
-        _wgpu_src + "ggml-webgpu.cpp",
-    )
 
 # Add Vulkan per-shader generated .cpp files (produced by generate_vulkan_shaders).
 # These exist on disk after a previous generation pass; SCons picks them up here.
