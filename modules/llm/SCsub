@@ -222,7 +222,7 @@ if platform in ("linuxbsd", "windows", "android"):
             # Pass the full .dll.a path directly — no sysroot modification needed
             env.Append(LINKFLAGS=[_implib])
         else:
-            env.Append(LIBS=["vulkan-1"])  # native Windows MSVC/MinGW has the loader
+            env.Append(LINKFLAGS=["vulkan-1.lib"])  # bypass Godot's LIBSUFFIX mangling
 
     else:
         # Linux: link libvulkan via SDK path
