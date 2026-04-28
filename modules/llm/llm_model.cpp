@@ -36,12 +36,16 @@
 #include "core/error/error_macros.h"
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
+#include "core/os/thread.h"
 
 LLMModel::LLMModel() {
 	llama_backend_init();
 }
 
 LLMModel::~LLMModel() {
+	if (worker.is_started()) {
+		worker.wait_to_finish();
+	}
 	unload();
 }
 
@@ -57,6 +61,7 @@ void LLMModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load"), &LLMModel::load);
 	ClassDB::bind_method(D_METHOD("unload"), &LLMModel::unload);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &LLMModel::is_loaded);
+	ClassDB::bind_method(D_METHOD("is_loading"), &LLMModel::is_loading);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "model_path", PROPERTY_HINT_FILE, "*.gguf"),
 			"set_model_path", "get_model_path");
@@ -68,37 +73,20 @@ void LLMModel::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("load_failed", PropertyInfo(Variant::STRING, "error")));
 }
 
-void LLMModel::set_model_path(const String &p_path) {
-	model_path = p_path;
-}
-String LLMModel::get_model_path() const {
-	return model_path;
-}
-void LLMModel::set_n_gpu_layers(int p_layers) {
-	n_gpu_layers = p_layers;
-}
-int LLMModel::get_n_gpu_layers() const {
-	return n_gpu_layers;
-}
-void LLMModel::set_use_mmap(bool p_enabled) {
-	use_mmap = p_enabled;
-}
-bool LLMModel::get_use_mmap() const {
-	return use_mmap;
-}
-void LLMModel::set_use_mlock(bool p_enabled) {
-	use_mlock = p_enabled;
-}
-bool LLMModel::get_use_mlock() const {
-	return use_mlock;
+void LLMModel::set_model_path(const String &p_path) { model_path = p_path; }
+String LLMModel::get_model_path() const { return model_path; }
+void LLMModel::set_n_gpu_layers(int p_layers) { n_gpu_layers = p_layers; }
+int LLMModel::get_n_gpu_layers() const { return n_gpu_layers; }
+void LLMModel::set_use_mmap(bool p_enabled) { use_mmap = p_enabled; }
+bool LLMModel::get_use_mmap() const { return use_mmap; }
+void LLMModel::set_use_mlock(bool p_enabled) { use_mlock = p_enabled; }
+bool LLMModel::get_use_mlock() const { return use_mlock; }
+
+void LLMModel::_load_thread(void *p_userdata) {
+	static_cast<LLMModel *>(p_userdata)->_do_load();
 }
 
-Error LLMModel::load() {
-	ERR_FAIL_COND_V_MSG(model_path.is_empty(), ERR_UNCONFIGURED, "LLMModel: model_path is not set.");
-	ERR_FAIL_COND_V_MSG(model != nullptr, ERR_ALREADY_IN_USE, "LLMModel: model is already loaded.");
-
-	// Resolve res:// paths through the importer switcharoo so llama.cpp gets
-	// a real OS path to the file in .godot/imported/ rather than the virtual source.
+void LLMModel::_do_load() {
 	String resolved = model_path;
 	if (model_path.begins_with("res://")) {
 		String imported = ResourceFormatImporter::get_singleton()->get_internal_resource_path(model_path);
@@ -111,24 +99,39 @@ Error LLMModel::load() {
 	params.use_mmap = use_mmap;
 	params.use_mlock = use_mlock;
 
-	model = llama_model_load_from_file(resolved.utf8().get_data(), params);
-	if (model == nullptr) {
-		String err = "LLMModel: failed to load model from " + model_path;
-		emit_signal("load_failed", err);
-		ERR_FAIL_V_MSG(FAILED, err);
-	}
+	llama_model *loaded = llama_model_load_from_file(resolved.utf8().get_data(), params);
 
-	emit_signal("loaded");
+	MutexLock lock(worker_mutex);
+	loading = false;
+	if (loaded == nullptr) {
+		String err = "LLMModel: failed to load model from " + model_path;
+		call_deferred("emit_signal", "load_failed", err);
+	} else {
+		model = loaded;
+		call_deferred("emit_signal", "loaded");
+	}
+}
+
+Error LLMModel::load() {
+	ERR_FAIL_COND_V_MSG(model_path.is_empty(), ERR_UNCONFIGURED, "LLMModel: model_path is not set.");
+	MutexLock lock(worker_mutex);
+	ERR_FAIL_COND_V_MSG(loading, ERR_BUSY, "LLMModel: already loading.");
+	ERR_FAIL_COND_V_MSG(model != nullptr, ERR_ALREADY_IN_USE, "LLMModel: model is already loaded.");
+	if (worker.is_started()) {
+		worker.wait_to_finish();
+	}
+	loading = true;
+	worker.start(_load_thread, this);
 	return OK;
 }
 
 void LLMModel::unload() {
+	MutexLock lock(worker_mutex);
 	if (model != nullptr) {
 		llama_model_free(model);
 		model = nullptr;
 	}
 }
 
-bool LLMModel::is_loaded() const {
-	return model != nullptr;
-}
+bool LLMModel::is_loaded() const { return model != nullptr; }
+bool LLMModel::is_loading() const { return loading; }
