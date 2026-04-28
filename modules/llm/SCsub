@@ -63,7 +63,7 @@ if True:  # CPU backend needed on all platforms including web for tensor buffer 
     ]
 
     # Architecture-specific CPU implementations (not on web: wasm32 has no x86/arm SIMD)
-    if platform != "web":
+    if env["platform"] != "web":
         _target_arch = env.get("arch", "")
         _is_arm = _target_arch in ("arm64", "arm32", "armv7") or env["platform"] == "android"
         if _is_arm:
