@@ -33,26 +33,34 @@
 #include <thirdparty/llama_cpp/include/llama.h>
 
 #include "core/object/ref_counted.h"
+#include "core/os/mutex.h"
+#include "core/os/thread.h"
 #include "core/string/ustring.h"
 
-// Loads a GGUF model file into memory.
-// GPU acceleration is automatic: Metal on macOS, CUDA on Linux/Windows
-// when the module was built with the respective backend (see SCsub).
+// Loads a GGUF model file into memory asynchronously.
+// Call load() then await the loaded or load_failed signal.
 //
 // GDScript:
 //   var model = LLMModel.new()
 //   model.model_path = "/path/to/model.gguf"
-//   model.n_gpu_layers = -1  # -1 = all layers on GPU
-//   var err = model.load()
+//   model.loaded.connect(func(): print("ready"))
+//   model.load_failed.connect(func(e): push_error(e))
+//   model.load()
 class LLMModel : public RefCounted {
 	GDCLASS(LLMModel, RefCounted);
 
 	String model_path;
-	int n_gpu_layers = -1; // -1 = all layers; 0 = CPU only
+	int n_gpu_layers = -1;
 	bool use_mmap = true;
 	bool use_mlock = false;
 
 	llama_model *model = nullptr;
+	Thread worker;
+	Mutex worker_mutex;
+	bool loading = false;
+
+	static void _load_thread(void *p_userdata);
+	void _do_load();
 
 protected:
 	static void _bind_methods();
@@ -70,11 +78,12 @@ public:
 	void set_use_mlock(bool p_enabled);
 	bool get_use_mlock() const;
 
+	// Async: returns immediately, emits loaded or load_failed when done.
 	Error load();
 	void unload();
 	bool is_loaded() const;
+	bool is_loading() const;
 
-	// Internal: accessed by LLMContext.
 	llama_model *get_llama_model() const { return model; }
 
 	LLMModel();

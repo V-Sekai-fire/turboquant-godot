@@ -35,16 +35,19 @@
 #include <thirdparty/llama_cpp/include/llama.h>
 
 #include "core/object/ref_counted.h"
+#include "core/os/mutex.h"
+#include "core/os/thread.h"
 #include "core/string/ustring.h"
 
 // Inference context wrapping llama_context*.
-// KV cache types are set via string: "f16", "q8_0", "q4_0", "turbo2", "turbo3", "turbo4"
+// KV cache types: "f16", "q8_0", "q4_0", "turbo2", "turbo3", "turbo4"
 //
 // GDScript:
 //   var ctx = LLMContext.new()
 //   ctx.n_ctx = 32768
 //   ctx.cache_type_k = "q8_0"
 //   ctx.cache_type_v = "turbo4"
+//   ctx.created.connect(func(): chat.setup(model, ctx))
 //   ctx.create(model)
 class LLMContext : public RefCounted {
 	GDCLASS(LLMContext, RefCounted);
@@ -56,8 +59,14 @@ class LLMContext : public RefCounted {
 	String cache_type_v = "turbo4";
 
 	llama_context *ctx = nullptr;
+	Thread worker;
+	Mutex worker_mutex;
+	bool creating = false;
+	Ref<LLMModel> pending_model;
 
 	static ggml_type _parse_cache_type(const String &p_name);
+	static void _create_thread(void *p_userdata);
+	void _do_create();
 
 protected:
 	static void _bind_methods();
@@ -72,16 +81,17 @@ public:
 	void set_flash_attn(bool p_enabled);
 	bool get_flash_attn() const;
 
-	// Valid values: "f16", "q8_0", "q4_0", "turbo2", "turbo3", "turbo4"
 	void set_cache_type_k(const String &p_type);
 	String get_cache_type_k() const;
 
 	void set_cache_type_v(const String &p_type);
 	String get_cache_type_v() const;
 
+	// Async: returns immediately, emits created or create_failed when done.
 	Error create(Ref<LLMModel> p_model);
 	void destroy();
 	bool is_valid() const;
+	bool is_creating() const;
 
 	llama_context *get_llama_context() const { return ctx; }
 

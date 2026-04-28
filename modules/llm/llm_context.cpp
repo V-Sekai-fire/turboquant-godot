@@ -34,6 +34,9 @@
 #include "core/object/class_db.h"
 
 LLMContext::~LLMContext() {
+	if (worker.is_started()) {
+		worker.wait_to_finish();
+	}
 	destroy();
 }
 
@@ -53,7 +56,7 @@ ggml_type LLMContext::_parse_cache_type(const String &p_name) {
 	if (p_name == "q4_0") {
 		return GGML_TYPE_Q4_0;
 	}
-	return GGML_TYPE_F16; // default / "f16"
+	return GGML_TYPE_F16;
 }
 
 void LLMContext::_bind_methods() {
@@ -70,6 +73,7 @@ void LLMContext::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create", "model"), &LLMContext::create);
 	ClassDB::bind_method(D_METHOD("destroy"), &LLMContext::destroy);
 	ClassDB::bind_method(D_METHOD("is_valid"), &LLMContext::is_valid);
+	ClassDB::bind_method(D_METHOD("is_creating"), &LLMContext::is_creating);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "n_ctx"), "set_n_ctx", "get_n_ctx");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "n_threads"), "set_n_threads", "get_n_threads");
@@ -80,44 +84,27 @@ void LLMContext::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "cache_type_v", PROPERTY_HINT_ENUM,
 						 "f16,q8_0,q4_0,turbo2,turbo3,turbo4"),
 			"set_cache_type_v", "get_cache_type_v");
+
+	ADD_SIGNAL(MethodInfo("created"));
+	ADD_SIGNAL(MethodInfo("create_failed", PropertyInfo(Variant::STRING, "error")));
 }
 
-void LLMContext::set_n_ctx(int p_n_ctx) {
-	n_ctx = p_n_ctx;
-}
-int LLMContext::get_n_ctx() const {
-	return n_ctx;
-}
-void LLMContext::set_n_threads(int p_threads) {
-	n_threads = p_threads;
-}
-int LLMContext::get_n_threads() const {
-	return n_threads;
-}
-void LLMContext::set_flash_attn(bool p_enabled) {
-	flash_attn = p_enabled;
-}
-bool LLMContext::get_flash_attn() const {
-	return flash_attn;
-}
-void LLMContext::set_cache_type_k(const String &p_type) {
-	cache_type_k = p_type;
-}
-String LLMContext::get_cache_type_k() const {
-	return cache_type_k;
-}
-void LLMContext::set_cache_type_v(const String &p_type) {
-	cache_type_v = p_type;
-}
-String LLMContext::get_cache_type_v() const {
-	return cache_type_v;
+void LLMContext::set_n_ctx(int p_n_ctx) { n_ctx = p_n_ctx; }
+int LLMContext::get_n_ctx() const { return n_ctx; }
+void LLMContext::set_n_threads(int p_threads) { n_threads = p_threads; }
+int LLMContext::get_n_threads() const { return n_threads; }
+void LLMContext::set_flash_attn(bool p_enabled) { flash_attn = p_enabled; }
+bool LLMContext::get_flash_attn() const { return flash_attn; }
+void LLMContext::set_cache_type_k(const String &p_type) { cache_type_k = p_type; }
+String LLMContext::get_cache_type_k() const { return cache_type_k; }
+void LLMContext::set_cache_type_v(const String &p_type) { cache_type_v = p_type; }
+String LLMContext::get_cache_type_v() const { return cache_type_v; }
+
+void LLMContext::_create_thread(void *p_userdata) {
+	static_cast<LLMContext *>(p_userdata)->_do_create();
 }
 
-Error LLMContext::create(Ref<LLMModel> p_model) {
-	ERR_FAIL_COND_V_MSG(p_model.is_null(), ERR_INVALID_PARAMETER, "LLMContext: model is null.");
-	ERR_FAIL_COND_V_MSG(!p_model->is_loaded(), ERR_INVALID_PARAMETER, "LLMContext: model not loaded.");
-	ERR_FAIL_COND_V_MSG(ctx != nullptr, ERR_ALREADY_IN_USE, "LLMContext: already created.");
-
+void LLMContext::_do_create() {
 	llama_context_params cparams = llama_context_default_params();
 	cparams.n_ctx = n_ctx;
 	cparams.n_threads = n_threads;
@@ -127,19 +114,43 @@ Error LLMContext::create(Ref<LLMModel> p_model) {
 	cparams.type_k = _parse_cache_type(cache_type_k);
 	cparams.type_v = _parse_cache_type(cache_type_v);
 
-	ctx = llama_init_from_model(p_model->get_llama_model(), cparams);
-	ERR_FAIL_COND_V_MSG(ctx == nullptr, FAILED, "LLMContext: llama_init_from_model failed.");
+	llama_context *created = llama_init_from_model(
+			pending_model->get_llama_model(), cparams);
 
+	MutexLock lock(worker_mutex);
+	creating = false;
+	pending_model.unref();
+	if (created == nullptr) {
+		call_deferred("emit_signal", "create_failed",
+				String("LLMContext: llama_init_from_model failed."));
+	} else {
+		ctx = created;
+		call_deferred("emit_signal", "created");
+	}
+}
+
+Error LLMContext::create(Ref<LLMModel> p_model) {
+	ERR_FAIL_COND_V_MSG(p_model.is_null(), ERR_INVALID_PARAMETER, "LLMContext: model is null.");
+	ERR_FAIL_COND_V_MSG(!p_model->is_loaded(), ERR_INVALID_PARAMETER, "LLMContext: model not loaded.");
+	MutexLock lock(worker_mutex);
+	ERR_FAIL_COND_V_MSG(creating, ERR_BUSY, "LLMContext: already creating.");
+	ERR_FAIL_COND_V_MSG(ctx != nullptr, ERR_ALREADY_IN_USE, "LLMContext: already created.");
+	if (worker.is_started()) {
+		worker.wait_to_finish();
+	}
+	pending_model = p_model;
+	creating = true;
+	worker.start(_create_thread, this);
 	return OK;
 }
 
 void LLMContext::destroy() {
+	MutexLock lock(worker_mutex);
 	if (ctx != nullptr) {
 		llama_free(ctx);
 		ctx = nullptr;
 	}
 }
 
-bool LLMContext::is_valid() const {
-	return ctx != nullptr;
-}
+bool LLMContext::is_valid() const { return ctx != nullptr; }
+bool LLMContext::is_creating() const { return creating; }
