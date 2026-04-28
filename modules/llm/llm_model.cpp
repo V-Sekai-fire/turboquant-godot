@@ -37,7 +37,7 @@
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
 
-#ifdef __EMSCRIPTEN__
+#ifdef WEB_ENABLED
 #include "core/io/file_access.h"
 #include <cstdio>
 #endif
