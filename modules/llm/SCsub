@@ -30,9 +30,10 @@ all_inc = ggml_inc + llama_inc + ["#modules/llm/compat"]  # spirv-headers/ shim 
 ggml_c_sources = [
     tp + "ggml/src/ggml.c",  # keep .c; ggml.cpp is a 26-line terminate handler
     tp + "ggml/src/ggml-alloc.c",
-    # ggml-quants.c omitted when CPU backend is active: ggml-cpu/quants.c owns
-    # these symbols (scalar fallbacks on wasm32, SIMD dispatch elsewhere).
-    # Included only when the CPU backend is not compiled (was: web-only build).
+    # On native: ggml-quants.c provides _ref/_generic fallbacks called by
+    # ggml-cpu/quants.c's SIMD dispatch. On web: omitted because ggml-cpu/quants.c
+    # compiles to scalar-only (no SIMD) and would duplicate these symbols.
+    *([] if env["platform"] == "web" else [tp + "ggml/src/ggml-quants.c"]),
     tp + "ggml/src/ggml-turbo-quant.c",
 ]
 
