@@ -249,7 +249,13 @@ void LLMChat::_run_inference(const Array &p_messages) {
 	// Buffer incomplete UTF-8 byte sequences that may span token boundaries.
 	PackedByteArray utf8_buf;
 
-	for (int i = 0; i < max_tokens; i++) {
+	// max_tokens <= 0 means "no limit": generate until EOS or the context window
+	// is full. The remaining space is n_ctx minus tokens already in the KV cache.
+	const int token_budget = (max_tokens > 0)
+			? max_tokens
+			: (int)n_ctx - (int)cached_tokens.size();
+
+	for (int i = 0; i < token_budget; i++) {
 		// Reduction point: check for an exit signal before sampling the next token.
 		if (abort_flag.load(std::memory_order_relaxed)) {
 			break;
