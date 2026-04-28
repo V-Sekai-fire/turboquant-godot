@@ -32,13 +32,14 @@
 
 #include "llm_context.h"
 #include "llm_model.h"
-#include <thirdparty/llama_cpp/include/llama.h>
 
 #include "core/object/ref_counted.h"
 #include "core/os/mutex.h"
 #include "core/os/thread.h"
 #include "core/string/ustring.h"
 #include "core/variant/array.h"
+
+#include <thirdparty/llama_cpp/include/llama.h>
 
 #include <vector>
 
