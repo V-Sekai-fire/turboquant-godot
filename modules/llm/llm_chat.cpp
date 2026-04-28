@@ -42,6 +42,7 @@
 void LLMChat::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "model", "context"), &LLMChat::setup);
 	ClassDB::bind_method(D_METHOD("complete", "messages"), &LLMChat::complete);
+	ClassDB::bind_method(D_METHOD("cancel"), &LLMChat::cancel);
 	ClassDB::bind_method(D_METHOD("reset"), &LLMChat::reset);
 	ClassDB::bind_method(D_METHOD("is_busy"), &LLMChat::is_busy);
 
@@ -125,12 +126,20 @@ void LLMChat::complete(const Array &p_messages) {
 		worker.wait_to_finish();
 	}
 
+	abort_flag.store(false, std::memory_order_relaxed);
+
 	Job *job = memnew(Job);
 	job->messages = p_messages;
 	job->self = this;
 	busy = true;
 
 	worker.start(_worker_func, job);
+}
+
+void LLMChat::cancel() {
+	// Fire-and-forget exit signal. The worker checks abort_flag at each token
+	// boundary and will clear busy before returning, after which reset() is safe.
+	abort_flag.store(true, std::memory_order_relaxed);
 }
 
 void LLMChat::reset() {
@@ -241,6 +250,11 @@ void LLMChat::_run_inference(const Array &p_messages) {
 	PackedByteArray utf8_buf;
 
 	for (int i = 0; i < max_tokens; i++) {
+		// Reduction point: check for an exit signal before sampling the next token.
+		if (abort_flag.load(std::memory_order_relaxed)) {
+			break;
+		}
+
 		llama_token token_id = llama_sampler_sample(sampler, lctx, -1);
 		llama_sampler_accept(sampler, token_id);
 
