@@ -37,6 +37,10 @@
 #include "core/io/resource_importer.h"
 #include "core/object/class_db.h"
 
+#ifdef WEB_ENABLED
+#include <cstdio>
+#endif
+
 
 LLMModel::LLMModel() {
 }
@@ -58,6 +62,7 @@ void LLMModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_use_mlock", "enabled"), &LLMModel::set_use_mlock);
 	ClassDB::bind_method(D_METHOD("get_use_mlock"), &LLMModel::get_use_mlock);
 	ClassDB::bind_method(D_METHOD("load"), &LLMModel::load);
+	ClassDB::bind_method(D_METHOD("load_from_buffer", "data"), &LLMModel::load_from_buffer);
 	ClassDB::bind_method(D_METHOD("unload"), &LLMModel::unload);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &LLMModel::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_loading"), &LLMModel::is_loading);
@@ -100,7 +105,25 @@ void LLMModel::_do_load() {
 	params.use_mmap = use_mmap;
 	params.use_mlock = use_mlock;
 
-	llama_model *loaded = llama_model_load_from_file(resolved.utf8().get_data(), params);
+	llama_model *loaded = nullptr;
+
+#ifdef WEB_ENABLED
+	if (!model_data.is_empty()) {
+		// Data came from load_from_buffer() — already in WASM linear memory,
+		// accessible from this pthread. Use fmemopen to get a FILE* for llama.cpp.
+		params.use_mmap = false;
+		FILE *fp = fmemopen(model_data.ptrw(), model_data.size(), "rb");
+		if (fp) {
+			loaded = llama_model_load_from_file_ptr(fp, params);
+			fclose(fp);
+		}
+		model_data.clear();
+	} else {
+		loaded = llama_model_load_from_file(resolved.utf8().get_data(), params);
+	}
+#else
+	loaded = llama_model_load_from_file(resolved.utf8().get_data(), params);
+#endif
 
 	MutexLock lock(worker_mutex);
 	loading = false;
@@ -121,6 +144,21 @@ Error LLMModel::load() {
 	if (worker.is_started()) {
 		worker.wait_to_finish();
 	}
+	loading = true;
+	worker.start(_load_thread, this);
+	return OK;
+}
+
+Error LLMModel::load_from_buffer(const PackedByteArray &p_data) {
+	ERR_FAIL_COND_V_MSG(p_data.is_empty(), ERR_INVALID_PARAMETER, "LLMModel: buffer is empty.");
+	MutexLock lock(worker_mutex);
+	ERR_FAIL_COND_V_MSG(loading, ERR_BUSY, "LLMModel: already loading.");
+	ERR_FAIL_COND_V_MSG(model != nullptr, ERR_ALREADY_IN_USE, "LLMModel: model is already loaded.");
+	if (worker.is_started()) {
+		worker.wait_to_finish();
+	}
+	model_data.resize(p_data.size());
+	memcpy(model_data.ptrw(), p_data.ptr(), p_data.size());
 	loading = true;
 	worker.start(_load_thread, this);
 	return OK;

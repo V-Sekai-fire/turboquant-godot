@@ -58,6 +58,10 @@ class LLMModel : public RefCounted {
 	Thread worker;
 	Mutex worker_mutex;
 	bool loading = false;
+	// Holds data passed via load_from_buffer(); worker reads via fmemopen.
+	// PackedByteArray is WASM linear memory (SharedArrayBuffer) so the pointer
+	// is valid from any pthread without going through IDBFS.
+	Vector<uint8_t> model_data;
 
 	static void _load_thread(void *p_userdata);
 	void _do_load();
@@ -80,6 +84,8 @@ public:
 
 	// Async: returns immediately, emits loaded or load_failed when done.
 	Error load();
+	// Async load from raw bytes (e.g. web download body in WASM linear memory).
+	Error load_from_buffer(const PackedByteArray &p_data);
 	void unload();
 	bool is_loaded() const;
 	bool is_loading() const;
