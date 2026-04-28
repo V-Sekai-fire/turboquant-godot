@@ -211,20 +211,7 @@ if platform in ("linuxbsd", "windows", "android"):
         env.Append(LIBS=["vulkan"])  # libvulkan.so is part of the Android system image
 
     elif platform == "windows":
-        # Windows: link vulkan-1.dll (always present on Win7+ with modern GPU drivers).
-        # For MinGW cross-compile generate a stub import library with dlltool.
-        _is_cross = sys.platform != "win32"
-        if _is_cross and _sdk:
-            from vulkan_builders import generate_mingw_vulkan_implib
-
-            _implib_dir = Dir("#thirdparty/llama_cpp/ggml/src/ggml-vulkan").abspath + "/mingw-implib"
-            _implib = generate_mingw_vulkan_implib(_sdk + "/include", _implib_dir)
-            # Pass the full .dll.a path directly — no sysroot modification needed
-            env.Append(LINKFLAGS=[_implib])
-        else:
-            env.Append(LINKFLAGS=["vulkan-1.lib"])  # bypass Godot's LIBSUFFIX mangling
-            if _sdk:
-                env.Append(LIBPATH=[_sdk + "/Lib"])
+        pass  # Godot uses volk (USE_VOLK) on Windows which provides all Vulkan symbols.
 
     else:
         # Linux: link libvulkan via SDK path
