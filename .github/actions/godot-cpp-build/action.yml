@@ -34,7 +34,7 @@ runs:
       run: ${{ inputs.bin }} --headless --dump-gdextension-interface --dump-extension-api
 
     - name: Inject ar response-file support
-      shell: python3
+      shell: python3 {0}
       run: |
         # Inject a SCons site_init.py that overrides the ar builder to use response
         # files internally, avoiding ARG_MAX / "Argument list too long" failures when
