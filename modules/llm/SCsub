@@ -200,27 +200,13 @@ if platform in ("linuxbsd", "windows", "android"):
     # spirv/unified1/spirv.hpp — use Godot's own vendored copy, no VULKAN_SDK needed.
     all_inc += ["#thirdparty/spirv-headers/include"]
 
-    # Resolve SDK path: prefer Godot's vulkan_sdk_path scons param, fall back to env var.
-    _sdk = env.get("vulkan_sdk_path", "") or _os.environ.get("VULKAN_SDK", "")
-
-    if platform == "android":
-        # Android Vulkan is part of the system image — just link it.
-        # Do NOT append NDK sysroot headers to env: Godot's Android build
-        # already configures them in the correct order, and adding them again
-        # disrupts libc++'s expected include ordering (NDK 29+).
-        env.Append(LIBS=["vulkan"])  # libvulkan.so is part of the Android system image
-
-    elif platform == "windows":
-        pass  # Godot uses volk (USE_VOLK) on Windows which provides all Vulkan symbols.
-
-    else:
-        # Linux: link libvulkan via SDK path
-        if _sdk:
-            env.Append(LIBS=["vulkan"], LIBPATH=[_sdk + "/lib"])
-        else:
-            print("llm module WARNING: Vulkan SDK not found.")
-            print("  Pass vulkan_sdk_path=/path/to/sdk to scons, or set VULKAN_SDK.")
-            env.Append(LIBS=["vulkan"])
+    # volk loader: ggml-vulkan.cpp is patched to define VK_NO_PROTOTYPES and
+    # include volk.h, so the only thing it needs from us is the include path.
+    # The volk.c object is already built by drivers/vulkan/SCsub when
+    # use_volk=yes (default on Linux/Windows/Android), so the global function
+    # pointers (vkGetInstanceProcAddr et al.) resolve at link time without
+    # any -lvulkan dependency.
+    all_inc += ["#thirdparty/volk"]
 
 # Web uses CPU backend only — no GPU backend available in Emscripten.
 # llama.cpp uses try/catch/throw; add -fwasm-exceptions to the link step so

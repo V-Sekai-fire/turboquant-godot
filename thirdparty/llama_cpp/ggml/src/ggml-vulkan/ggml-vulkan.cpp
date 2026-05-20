@@ -1,3 +1,11 @@
+// Godot fork: route Vulkan symbols through the vendored volk loader so we
+// don't need a build-time link against libvulkan. VK_NO_PROTOTYPES disables
+// the prototype declarations in vulkan_core.h; volk.h re-declares the
+// vkXXX symbols as global function pointers that volkInitialize() populates
+// at runtime (see ggml_vk_instance_init() below).
+#define VK_NO_PROTOTYPES
+#include "volk.h"
+
 #include "ggml-vulkan.h"
 #include <vulkan/vulkan_core.h>
 #if defined(GGML_VULKAN_RUN_TESTS) || defined(GGML_VULKAN_CHECK_RESULTS)
@@ -5860,6 +5868,14 @@ static void ggml_vk_instance_init() {
         return;
     }
     VK_LOG_DEBUG("ggml_vk_instance_init()");
+
+    // Godot fork: bootstrap volk so vkGetInstanceProcAddr is populated before
+    // Vulkan-Hpp's dynamic dispatcher reads it. Idempotent; safe if Godot's
+    // renderer already called it.
+    if (volkInitialize() != VK_SUCCESS) {
+        std::cerr << "ggml_vulkan: volkInitialize() failed; libvulkan unavailable at runtime." << std::endl;
+        throw vk::SystemError(vk::Result::eErrorInitializationFailed, "volkInitialize failed");
+    }
 
     // See https://github.com/KhronosGroup/Vulkan-Hpp?tab=readme-ov-file#extensions--per-device-function-pointers-
     ggml_vk_default_dispatcher_instance.init(vkGetInstanceProcAddr);
