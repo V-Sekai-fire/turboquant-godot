@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<class name="LLMModel" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+<class name="LLMModel" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
 	<brief_description>
 		Loads a GGUF model file for in-process LLM inference.
 	</brief_description>
@@ -37,6 +37,12 @@
 			<description>
 				Starts loading the model from [member model_path] on a background thread. Returns [constant OK] if the thread started successfully, or an error if [member model_path] is empty or the model is already loaded/loading.
 				Connect to [signal loaded] and [signal load_failed] to receive the result.
+			</description>
+		</method>
+		<method name="load_from_buffer">
+			<return type="int" enum="Error" />
+			<param index="0" name="data" type="PackedByteArray" />
+			<description>
 			</description>
 		</method>
 		<method name="unload">
