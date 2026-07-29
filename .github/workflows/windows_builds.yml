@@ -10,7 +10,6 @@ env:
     module_text_server_fb_enabled=yes
     debug_symbols=no
     "accesskit_sdk_path=${{ github.workspace }}/accesskit-c-0.21.2/"
-    scu_build=yes
   SCONS_CACHE_MSVC_CONFIG: true
   PYTHONIOENCODING: utf8
 

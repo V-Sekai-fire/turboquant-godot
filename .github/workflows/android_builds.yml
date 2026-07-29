@@ -13,7 +13,6 @@ env:
     dev_mode=yes
     module_text_server_fb_enabled=yes
     swappy=yes
-    scu_build=yes
 
 jobs:
   build-android:

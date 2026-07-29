@@ -9,7 +9,6 @@ env:
     dev_mode=yes
     debug_symbols=no
     use_closure_compiler=yes
-    scu_build=yes
   EM_VERSION: 5.0.6
 
 jobs:

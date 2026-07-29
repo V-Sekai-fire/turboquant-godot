@@ -14,7 +14,6 @@ env:
     dev_mode=yes
     module_text_server_fb_enabled=yes
     "accesskit_sdk_path=${{ github.workspace }}/accesskit-c-0.21.2/"
-    scu_build=yes
   GODOT_CPP_BRANCH: 4.5
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
