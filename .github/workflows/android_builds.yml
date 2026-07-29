@@ -67,12 +67,6 @@ jobs:
       - name: Download Swappy
         run: python ./misc/scripts/install_swappy_android.py
 
-      - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1
-        with:
-          install_runtime: false
-          cache: true
-
       - name: Compilation
         uses: ./.github/actions/godot-build
         with:

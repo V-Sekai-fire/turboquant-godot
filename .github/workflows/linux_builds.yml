@@ -13,7 +13,6 @@ env:
   SCONS_FLAGS: >-
     dev_mode=yes
     module_text_server_fb_enabled=yes
-    "accesskit_sdk_path=${{ github.workspace }}/accesskit-c-0.21.2/"
   GODOT_CPP_BRANCH: 4.5
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -27,7 +26,7 @@ jobs:
     # Stay one LTS before latest to increase portability of Linux artifacts.
     runs-on: ubuntu-22.04
     name: ${{ matrix.name }}
-    timeout-minutes: ${{ matrix.timeout-minutes || 120 }}
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -47,16 +46,13 @@ jobs:
             godot-cpp: true
             clangd-tidy: true
 
-          - name: Editor with doubles and GCC sanitizers (target=editor, dev_build=yes, precision=double, use_asan=yes, use_ubsan=yes, linker=mold)
+          - name: Editor with doubles and GCC sanitizers (target=editor, dev_build=yes, scu_build=yes, precision=double, use_asan=yes, use_ubsan=yes, linker=mold)
             cache-name: linux-editor-double-sanitizers
-            timeout-minutes: 180
             target: editor
             # Debug symbols disabled as they're huge on this build and we hit the 14 GB limit for runners.
-            # SCU disabled because with double precision + ASAN + UBSAN, the SCU object file is
-            # too large for even mold to link within 3 hours. Per-file objects link much faster.
             scons-flags: >-
               dev_build=yes
-              scu_build=no
+              scu_build=yes
               debug_symbols=no
               precision=double
               use_asan=yes
@@ -182,12 +178,6 @@ jobs:
             echo "::warning::AccessKit SDK installation failed, building without AccessKit support."
             echo "ACCESSKIT_ENABLED=no" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1
-        with:
-          install_runtime: false
-          cache: true
 
       - name: Install mold linker
         if: matrix.proj-test
