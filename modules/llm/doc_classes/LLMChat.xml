@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="LLMChat" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Async chat completion using in-process llama.cpp inference.
+	</brief_description>
+	<description>
+		Runs chat completion on a worker thread. Emits [signal token_generated] for each token as it is produced (streaming) and [signal response_received] when the full response is ready.
+		[codeblocks]
+		[gdscript]
+		var chat = LLMChat.new()
+		chat.setup(model, ctx)
+		chat.max_tokens = 256
+		chat.enable_thinking = false
+		chat.token_generated.connect(func(tok): print(tok))
+		chat.response_received.connect(func(text): print("Done:", text))
+		chat.complete([{"role": "user", "content": "Hello"}])
+		[/gdscript]
+		[/codeblocks]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="cancel">
+			<return type="void" />
+			<description>
+			</description>
+		</method>
+		<method name="complete">
+			<return type="void" />
+			<param index="0" name="messages" type="Array" />
+			<description>
+				Starts an async chat completion. [param messages] is an [Array] of [Dictionary] with [code]role[/code] ([code]"system"[/code], [code]"user"[/code], [code]"assistant"[/code]) and [code]content[/code] keys.
+				Emits [signal token_generated] for each token, then [signal response_received] when done. Emits [signal inference_failed] on error.
+				Only one request may be in flight at a time — check [method is_busy] first.
+			</description>
+		</method>
+		<method name="is_busy" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if a completion request is currently running.
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="model" type="LLMModel" />
+			<param index="1" name="context" type="LLMContext" />
+			<description>
+				Associates this chat instance with a loaded [LLMModel] and an initialized [LLMContext]. Must be called before [method complete].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="enable_thinking" type="bool" setter="set_enable_thinking" getter="get_enable_thinking" default="false">
+			When [code]true[/code], includes the model's chain-of-thought reasoning in the output (Qwen3.5 thinking mode). The reasoning content appears before the final answer in the response.
+		</member>
+		<member name="max_tokens" type="int" setter="set_max_tokens" getter="get_max_tokens" default="1024">
+			Maximum number of tokens to generate per completion.
+		</member>
+		<member name="repeat_penalty" type="float" setter="set_repeat_penalty" getter="get_repeat_penalty" default="1.1">
+			Penalty applied to recently generated tokens to reduce repetition.
+		</member>
+		<member name="temperature" type="float" setter="set_temperature" getter="get_temperature" default="0.7">
+			Sampling temperature. Higher values produce more random outputs.
+		</member>
+		<member name="top_k" type="int" setter="set_top_k" getter="get_top_k" default="40">
+			Top-K sampling — number of top tokens to sample from.
+		</member>
+		<member name="top_p" type="float" setter="set_top_p" getter="get_top_p" default="0.9">
+			Nucleus sampling probability mass.
+		</member>
+	</members>
+	<signals>
+		<signal name="inference_failed">
+			<param index="0" name="error" type="String" />
+			<description>
+				Emitted if inference fails. [param error] contains the error message.
+			</description>
+		</signal>
+		<signal name="response_received">
+			<param index="0" name="text" type="String" />
+			<description>
+				Emitted when the full response is ready. [param text] contains the complete generated text.
+			</description>
+		</signal>
+		<signal name="token_generated">
+			<param index="0" name="token" type="String" />
+			<description>
+				Emitted for each token as it is generated. Use this for streaming output.
+			</description>
+		</signal>
+	</signals>
+</class>

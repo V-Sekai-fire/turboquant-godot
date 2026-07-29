@@ -33,6 +33,69 @@ runs:
       shell: sh
       run: ${{ inputs.bin }} --headless --dump-gdextension-interface --dump-extension-api
 
+    - name: Inject ar response-file support
+      shell: python3 {0}
+      run: |
+        # Inject a SCons site_init.py that overrides the ar builder to use response
+        # files internally, avoiding ARG_MAX / "Argument list too long" failures when
+        # archiving the hundreds of generated godot-cpp binding objects.  The patch
+        # runs inside the SCons Python process so no external exec with a huge argv
+        # is ever attempted.
+        import os
+
+        site_dir = os.path.join(
+            os.environ["GITHUB_WORKSPACE"], "godot-cpp", "test", "site_scons"
+        )
+        os.makedirs(site_dir, exist_ok=True)
+
+        site_init = os.path.join(site_dir, "site_init.py")
+        with open(site_init, "w") as fh:
+            fh.write(
+                "import SCons.Tool.ar as _ar_tool\n"
+                "import SCons.Action\n"
+                "\n"
+                "_orig_generate = _ar_tool.generate\n"
+                "\n"
+                "\n"
+                "def _ar_rsp(target, source, env):\n"
+                "    import subprocess, tempfile, os\n"
+                "    target_str = str(target[0])\n"
+                "    sources = [str(s) for s in source]\n"
+                "    flags = env.subst('$ARFLAGS')\n"
+                "    ar_exe = env.subst('$AR')\n"
+                "    with tempfile.NamedTemporaryFile(\n"
+                "        mode='w', suffix='.rsp', delete=False, dir='/tmp'\n"
+                "    ) as f:\n"
+                "        f.write('\\n'.join(sources) + '\\n')\n"
+                "        rsp = f.name\n"
+                "    try:\n"
+                "        return subprocess.call([ar_exe, flags, target_str, '@' + rsp])\n"
+                "    finally:\n"
+                "        try:\n"
+                "            os.unlink(rsp)\n"
+                "        except OSError:\n"
+                "            pass\n"
+                "\n"
+                "\n"
+                "def _patched_ar_generate(env):\n"
+                "    _orig_generate(env)\n"
+                "    try:\n"
+                "        builder = env['BUILDERS']['StaticLibrary']\n"
+                "        new_ar = SCons.Action.Action(_ar_rsp, '$ARCOMSTR')\n"
+                "        if hasattr(builder.action, 'list'):\n"
+                "            from SCons.Action import ListAction\n"
+                "            builder.action = ListAction(\n"
+                "                [new_ar] + list(builder.action.list[1:])\n"
+                "            )\n"
+                "        else:\n"
+                "            builder.action = new_ar\n"
+                "    except Exception:\n"
+                "        pass\n"
+                "\n"
+                "\n"
+                "_ar_tool.generate = _patched_ar_generate\n"
+            )
+
     - name: SCons Build
       shell: sh
       env:

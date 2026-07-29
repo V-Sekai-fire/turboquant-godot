@@ -185,6 +185,11 @@ def process_folder(folders, sought_exceptions=[], includes_per_scu=0, extension=
     main_folder = folders[0]
     abs_main_folder = base_folder_path + main_folder
 
+    # Skip folders that don't exist on disk — template builds delete editor/
+    # before scons runs, so os.mkdir(editor/.scu) would fail otherwise.
+    if not os.path.isdir(abs_main_folder):
+        return
+
     # Keep a record of all folders that have been processed for SCU,
     # this enables deciding what to do when we call "add_source_files()"
     global _scu_folders
