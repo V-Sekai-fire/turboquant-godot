@@ -27,3 +27,9 @@ clangd:
   - "!modules/openxr/extensions/platform/openxr_{android,metal}_extension.{h,cpp}"
   - "!platform/{android,ios,macos,visionos,web,windows}/**"
   - "platform/{android,ios,macos,visionos,web,windows}/{api,export}/*.{h,hpp,hxx,hh,c,cpp,cxx,cc}"
+
+# Files appropriate for pre-commit style checks — excludes thirdparty to avoid
+# hitting the OS argument list limit when thousands of vendored files are renamed.
+precommit:
+  - "**"
+  - "!**/thirdparty/**"
