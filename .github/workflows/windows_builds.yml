@@ -9,6 +9,8 @@ env:
     dev_mode=yes
     module_text_server_fb_enabled=yes
     debug_symbols=no
+    "accesskit_sdk_path=${{ github.workspace }}/accesskit-c-0.21.2/"
+    scu_build=yes
   SCONS_CACHE_MSVC_CONFIG: true
   PYTHONIOENCODING: utf8
 
@@ -108,6 +110,12 @@ jobs:
             echo "::warning::AccessKit SDK installation failed, building without AccessKit support."
             echo "ACCESSKIT_ENABLED=no" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: false
+          cache: true
 
       - name: Compilation
         uses: ./.github/actions/godot-build
