@@ -3,12 +3,6 @@
 everything:
   - "**"
 
-# Files appropriate for pre-commit style checks — excludes thirdparty to avoid
-# hitting the OS argument list limit when thousands of vendored files are renamed.
-precommit:
-  - "**"
-  - "!**/thirdparty/**"
-
 # Determines if build actions should occur after static checks are ran. Broadly speaking, these
 #  files changing would result in SCons rebuilding the engine, or are otherwise pertinent to the
 #  buildsystem itself.
