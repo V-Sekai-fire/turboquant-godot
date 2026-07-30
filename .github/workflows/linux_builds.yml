@@ -179,6 +179,12 @@ jobs:
             echo "ACCESSKIT_ENABLED=no" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: false
+          cache: true
+
       - name: Install mold linker
         if: matrix.proj-test
         uses: rui314/setup-mold@v1
