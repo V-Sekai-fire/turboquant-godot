@@ -1,0 +1,20 @@
+draft acceptance rate = 0.80000 (   24 accepted /    30 generated)
+0.06.982.086 I statistics draft-mtp: #calls(b,g,a) = 1 15 15, #gen drafts = 15, #acc drafts = 13, #gen tokens = 30, #acc tokens = 24, dur(b,g,a) = 0.004, 98.423, 0.042 ms
+draft acceptance rate = 0.91489 (  258 accepted /   282 generated)
+0.13.701.536 I statistics draft-mtp: #calls(b,g,a) = 2 156 156, #gen drafts = 156, #acc drafts = 146, #gen tokens = 312, #acc tokens = 282, dur(b,g,a) = 0.005, 943.302, 0.381 ms
+draft acceptance rate = 0.88850 (  255 accepted /   287 generated)
+0.20.561.526 I statistics draft-mtp: #calls(b,g,a) = 3 300 300, #gen drafts = 300, #acc drafts = 280, #gen tokens = 599, #acc tokens = 537, dur(b,g,a) = 0.006, 1807.996, 0.726 ms
+draft acceptance rate = 0.96154 (  200 accepted /   208 generated)
+0.25.583.830 I statistics draft-mtp: #calls(b,g,a) = 4 404 404, #gen drafts = 404, #acc drafts = 382, #gen tokens = 807, #acc tokens = 737, dur(b,g,a) = 0.008, 2426.433, 0.963 ms
+draft acceptance rate = 0.62069 (   72 accepted /   116 generated)
+0.28.453.452 I statistics draft-mtp: #calls(b,g,a) = 5 462 462, #gen drafts = 462, #acc drafts = 426, #gen tokens = 923, #acc tokens = 809, dur(b,g,a) = 0.009, 2783.268, 1.092 ms
+draft acceptance rate = 0.52667 (   79 accepted /   150 generated)
+0.32.088.830 I statistics draft-mtp: #calls(b,g,a) = 6 537 537, #gen drafts = 537, #acc drafts = 476, #gen tokens = 1073, #acc tokens = 888, dur(b,g,a) = 0.010, 3247.951, 1.260 ms
+draft acceptance rate = 0.56364 (   62 accepted /   110 generated)
+0.34.847.499 I statistics draft-mtp: #calls(b,g,a) = 7 592 592, #gen drafts = 592, #acc drafts = 514, #gen tokens = 1183, #acc tokens = 950, dur(b,g,a) = 0.011, 3587.061, 1.388 ms
+draft acceptance rate = 0.80656 (  246 accepted /   305 generated)
+0.42.114.611 I statistics draft-mtp: #calls(b,g,a) = 8 745 745, #gen drafts = 745, #acc drafts = 651, #gen tokens = 1488, #acc tokens = 1196, dur(b,g,a) = 0.012, 4508.389, 1.733 ms
+draft acceptance rate = 0.78135 (  243 accepted /   311 generated)
+0.49.502.791 I statistics draft-mtp: #calls(b,g,a) = 9 901 901, #gen drafts = 901, #acc drafts = 784, #gen tokens = 1799, #acc tokens = 1439, dur(b,g,a) = 0.014, 5451.245, 2.080 ms
+draft acceptance rate = 0.83893 (  250 accepted /   298 generated)
+0.56.600.838 I statistics draft-mtp: #calls(b,g,a) = 10 1050 1050, #gen drafts = 1050, #acc drafts = 921, #gen tokens = 2097, #acc tokens = 1689, dur(b,g,a) = 0.015, 6344.766, 2.428 ms
