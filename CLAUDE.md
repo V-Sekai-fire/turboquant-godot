@@ -22,24 +22,61 @@ Conventional-commit prefixes (`feat:`, `fix:`, `chore:`) are not used here.
 
 ## Vendored llama.cpp base
 
-`thirdparty/llama_cpp` is a **git-subrepo**, not a hand-vendored drop. The
-source of truth is `thirdparty/llama_cpp/.gitrepo`; do not restate its values
-anywhere they can drift.
+`thirdparty/llama_cpp` is a **git subtree**, converted from git-subrepo. There
+is no metadata file: git subtree records the split point in the merge commit
+message, and that message is the source of truth.
+
+```
+git-subtree-dir:   thirdparty/llama_cpp
+git-subtree-split: 67559e580b10e4e47e9a6fd6218873997976886d
+```
 
 | field | value |
 |---|---|
-| remote | `https://github.com/TheTom/llama-cpp-turboquant` |
+| remote (`turboquant`) | `https://github.com/TheTom/llama-cpp-turboquant` |
 | branch | `feature/turboquant-kv-cache` |
-| commit | `67559e580b10e4e47e9a6fd6218873997976886d` |
+| split commit | `67559e580b10e4e47e9a6fd6218873997976886d` |
 
 That repo is public and is where TurboQuant is actually developed — the KV
 cache work has real history there across many branches. **The rebase happens in
 that repo, not in this one.** Reconstructing a delta from the squashed vendored
 tree is the wrong approach; rebase `feature/turboquant-kv-cache` onto upstream
-and then `git subrepo pull` the result back into `thirdparty/llama_cpp`.
+and then pull the result back:
+
+```
+git subtree pull --prefix=thirdparty/llama_cpp turboquant <branch> --squash
+```
+
+The remote was fetched with `--depth=1` at the split commit, so this repo did
+not absorb the fork's full history.
+
+### The local delta
+
+The vendored tree is **not** a clean copy of the split commit. Godot-local
+changes ride on top, and they were invisible under git-subrepo — a plain
+subtree import reverts every one of them. They are now a single explicit
+commit (`Reapply Godot-local llama.cpp changes on top of the subtree.`) so a
+later `subtree pull` conflicts against something reviewable:
+
+| path | change |
+|---|---|
+| `common/common.cpp` | macOS pre-10.15 filesystem fallback (`dirent`/`stat`) |
+| `ggml/src/ggml-backend-dl.h`, `ggml-backend-reg.cpp` | `ggml-no-backend-dl.patch`, pre-applied |
+| `ggml/src/ggml-vulkan/ggml-vulkan.cpp` | `ggml-vulkan-volk.patch`, pre-applied |
+| `ggml/src/ggml-cpu/arch/x86/quants.c` | `_mm_prefetch` cast to `const char *` |
+| `ggml/src/ggml-webgpu/ggml-wgsl-shaders.hpp` | generated, committed Godot-side only |
+| ~10 paths | pruned by vendoring (android/swiftui examples, `.gen.h`, `build-xcframework.sh`) |
+
+The patch files under `modules/llm/patches/` are **documentation of changes
+already applied**, not something the build applies. Do not apply them again.
+
+The conversion itself was content-neutral: the tree afterward is byte-identical
+to the tree before, except `.gitrepo` is gone. That was verified by diffing
+against a snapshot taken before the conversion, and it is the only guarantee
+that the mechanism change did not quietly revert code.
 
 `8ab23945b6` is the single commit that first landed the subrepo here, so this
-repo's history shows no upstream detail.
+repo's history shows no upstream detail before the conversion.
 
 ### Corroborating upstream base
 

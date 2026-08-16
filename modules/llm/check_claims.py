@@ -228,18 +228,39 @@ def parse_gitrepo(text):
     return out
 
 
-def check_subrepo_doc(gitrepo_text, claude_text):
-    """CLAUDE.md must restate .gitrepo exactly. The artefact wins; prose drifts."""
-    g = parse_gitrepo(gitrepo_text)
-    need = ["remote", "branch", "commit"]
-    missing_field = [k for k in need if not g.get(k)]
-    if missing_field:
-        return False, ".gitrepo has no %s" % ", ".join(missing_field)
-    drifted = [k for k in need if g[k] not in claude_text]
-    if drifted:
-        return False, "CLAUDE.md disagrees with .gitrepo on: %s (artefact says %s)" % (
-            ", ".join(drifted), ", ".join(g[k] for k in drifted))
-    return True, "remote/branch/commit match .gitrepo"
+def check_subtree_doc(split, remotes, gitrepo_exists, claude_text):
+    """CLAUDE.md must restate the subtree split point that git itself records.
+
+    git subtree keeps no metadata file; the split commit lives in the merge
+    commit message. That message is the artefact, so the prose defers to it.
+    """
+    if gitrepo_exists:
+        return False, ".gitrepo still present -- tree is still a git-subrepo, not a subtree"
+    if not split:
+        return False, "no git-subtree-split found for thirdparty/llama_cpp"
+    if split not in claude_text:
+        return False, "CLAUDE.md does not state the split commit %s" % split[:12]
+    if not any("llama-cpp-turboquant" in r for r in remotes):
+        return False, "no git remote points at llama-cpp-turboquant"
+    return True, "split %s, remote present, .gitrepo gone" % split[:12]
+
+
+def read_subtree_state(repo_root, prefix="thirdparty/llama_cpp"):
+    """(split commit, remote URLs, whether .gitrepo still exists)."""
+    def git(*a):
+        return subprocess.run(["git", "-C", repo_root] + list(a),
+                              capture_output=True, text=True).stdout
+
+    split = None
+    for line in git("log", "--grep=git-subtree-dir", "--format=%b").splitlines():
+        line = line.strip()
+        if line.startswith("git-subtree-dir:") and line.split(":", 1)[1].strip() != prefix:
+            split = None
+        elif line.startswith("git-subtree-split:") and split is None:
+            split = line.split(":", 1)[1].strip()
+            break
+    remotes = [l for l in git("remote", "-v").splitlines()]
+    return split, remotes, os.path.exists(os.path.join(repo_root, prefix, ".gitrepo"))
 
 
 def check_mtp_upstream(upstream, commit=MTP_UPSTREAM):
@@ -267,9 +288,25 @@ def sha256(path):
     return h.hexdigest()
 
 
+class Missing(Exception):
+    """A required input is absent. An unmet precondition is a FAIL, not a skip."""
+
+
 def read(path):
+    if not os.path.exists(path):
+        raise Missing(path)
     with open(path, encoding="utf-8", errors="replace") as fh:
         return fh.read()
+
+
+def guard(name, fn):
+    """Run a check, turning a missing input into a clean FAIL rather than a crash."""
+    try:
+        return name, fn()
+    except Missing as e:
+        return name, (False, "required file missing: %s" % e)
+    except Exception as e:  # noqa: BLE001 - a broken check must fail, not vanish
+        return name, (False, "check raised %s: %s" % (type(e).__name__, e))
 
 
 def self_test():
@@ -287,10 +324,17 @@ def self_test():
         ("model hash", lambda: check_model_hash("0" * 64)),
         ("arch missing", lambda: check_gap_hparams("case LLM_ARCH_LLAMA:")),
         ("mtp upstream: bad repo", lambda: check_mtp_upstream("/nonexistent-repo-path")),
-        ("subrepo: doc drift", lambda: check_subrepo_doc(
-            "[subrepo]\n\tremote = https://example.com/r\n\tbranch = b\n\tcommit = deadbeef\n",
-            "CLAUDE.md that never mentions the real values")),
-        ("subrepo: empty .gitrepo", lambda: check_subrepo_doc("[subrepo]\n", "anything")),
+        ("subtree: .gitrepo still there", lambda: check_subtree_doc(
+            "abc123", ["turboquant https://github.com/TheTom/llama-cpp-turboquant"], True, "abc123")),
+        ("subtree: no split recorded", lambda: check_subtree_doc(
+            None, ["turboquant https://github.com/TheTom/llama-cpp-turboquant"], False, "x")),
+        ("subtree: doc drift", lambda: check_subtree_doc(
+            "abc123def456", ["turboquant https://github.com/TheTom/llama-cpp-turboquant"], False,
+            "CLAUDE.md that never states the split")),
+        ("subtree: remote missing", lambda: check_subtree_doc(
+            "abc123def456", ["origin https://example.com/other"], False, "abc123def456")),
+        ("guard: missing file is a FAIL", lambda: guard(
+            "x", lambda: read("/nonexistent/path/file"))[1]),
         # The state gate must fail in BOTH directions and on partial rebases,
         # otherwise it is a one-way assertion that rots the moment work lands.
         ("state: declared absent, tree present", lambda: check_mtp_state(
@@ -340,18 +384,18 @@ def main():
 
     results, unchecked = [], []
 
-    results.append(("subrepo doc matches .gitrepo", check_subrepo_doc(
-        read(os.path.join(LC, ".gitrepo")), read(os.path.join(REPO, "CLAUDE.md")))))
+    results.append(guard("subtree doc matches git", lambda: check_subtree_doc(
+        *read_subtree_state(REPO), claude_text=read(os.path.join(REPO, "CLAUDE.md")))))
 
-    results.append(("turbo cache types", check_turbo_types(read(os.path.join(LC, "ggml/include/ggml.h")))))
+    results.append(guard("turbo cache types",
+                         lambda: check_turbo_types(read(os.path.join(LC, "ggml/include/ggml.h")))))
 
-    claude_md = read(os.path.join(REPO, "CLAUDE.md"))
-    results.append(("MTP state vs declared stage", check_mtp_state(
+    results.append(guard("MTP state vs declared stage", lambda: check_mtp_state(
         read(os.path.join(LC, "src/llama-model.cpp")),
         read(os.path.join(LC, "src/models/qwen35.cpp")),
         read(os.path.join(LC, "common/common.h")),
         read(os.path.join(LC, "common/arg.cpp")),
-        declared_mtp_state(claude_md))))
+        declared_mtp_state(read(os.path.join(REPO, "CLAUDE.md"))))))
 
     if os.path.exists(args.model):
         results.append(("model size", check_model_size(os.path.getsize(args.model))))
