@@ -23,7 +23,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LC = os.path.join(REPO, "thirdparty", "llama_cpp")
 
-BASE_COMMIT = "ca7f7b7b9"
+BASE_COMMIT = "89482bd66"
 MODEL_BYTES = 16810714560
 MODEL_SHA256 = "9d9b864f8a378721e9a78f87dec3161621217795843982d09764237ce7b86210"
 MODEL_PATH = os.path.expanduser(
@@ -46,7 +46,7 @@ CLEAN_FILES = [
     "src/llama-hparams.cpp",
 ]
 
-TURBO_TYPES = [("GGML_TYPE_TURBO2_0", 42), ("GGML_TYPE_TURBO3_0", 43), ("GGML_TYPE_TURBO4_0", 44)]
+TURBO_TYPES = [("GGML_TYPE_TURBO2_0", 43), ("GGML_TYPE_TURBO3_0", 44), ("GGML_TYPE_TURBO4_0", 47)]
 
 
 def arch_blocks(text, arch):
@@ -159,22 +159,72 @@ def check_mtp_head(arch, nextn_layers, block_count, names):
         idx, len(NEXTN_SUFFIXES), len(BLOCK_TENSORS))
 
 
-def read_gguf_mtp(path, gguf_py):
-    """Extract (arch, nextn_layers, block_count, tensor names) from a GGUF."""
-    sys.path.insert(0, gguf_py)
-    from gguf import GGUFReader
+def read_gguf_mtp(path, _unused=None):
+    """Extract (arch, nextn_layers, block_count, tensor names) from a GGUF.
 
-    r = GGUFReader(path, "r")
+    Deliberately parses the header directly instead of importing the vendored
+    gguf-py. That library is part of the subtree and moves with it -- a subtree
+    pull renamed GGML_MAX_DIMS and broke this check, which is a gate failing for
+    a reason that has nothing to do with what it is gating.
+    """
+    import struct
 
-    def field(k):
-        f = r.fields.get(k)
-        if f is None:
-            return None
-        v = f.contents()
-        return v.decode() if isinstance(v, bytes) else v
+    # value type ids from the GGUF spec
+    U8, I8, U16, I16, U32, I32, F32, BOOL, STR, ARR, U64, I64, F64 = range(13)
+    FIXED = {U8: "<B", I8: "<b", U16: "<H", I16: "<h", U32: "<I", I32: "<i",
+             F32: "<f", BOOL: "<?", U64: "<Q", I64: "<q", F64: "<d"}
 
-    return (field("general.architecture"), field("qwen35.nextn_predict_layers"),
-            field("qwen35.block_count"), [t.name for t in r.tensors])
+    with open(path, "rb") as fh:
+        blob = fh.read(64 << 20)  # header lives well inside the first chunk
+
+    if blob[:4] != b"GGUF":
+        raise ValueError("not a GGUF file (bad magic)")
+    pos = 4
+    _version, n_tensors, n_kv = struct.unpack_from("<IQQ", blob, pos)
+    pos += 20
+
+    def take(fmt):
+        nonlocal pos
+        v = struct.unpack_from(fmt, blob, pos)[0]
+        pos += struct.calcsize(fmt)
+        return v
+
+    def take_str():
+        nonlocal pos
+        n = take("<Q")
+        s = blob[pos:pos + n].decode("utf-8", "replace")
+        pos += n
+        return s
+
+    def take_val(t):
+        nonlocal pos
+        if t == STR:
+            return take_str()
+        if t == ARR:
+            et = take("<I")
+            n = take("<Q")
+            return [take_val(et) for _ in range(n)]
+        if t in FIXED:
+            return take(FIXED[t])
+        raise ValueError("unknown GGUF value type %d" % t)
+
+    kv = {}
+    for _ in range(n_kv):
+        k = take_str()
+        kv[k] = take_val(take("<I"))
+
+    names = []
+    for _ in range(n_tensors):
+        names.append(take_str())
+        nd = take("<I")
+        pos += 8 * nd      # dims
+        pos += 4 + 8       # ggml type + offset
+
+    arch = kv.get("general.architecture")
+    return (arch,
+            kv.get("%s.nextn_predict_layers" % arch),
+            kv.get("%s.block_count" % arch),
+            names)
 
 
 def declared_mtp_state(claude_text):
@@ -193,16 +243,21 @@ def check_mtp_state(model_cpp, qwen35_cpp, common_h, arg_cpp, declared):
     if declared not in ("absent", "present"):
         return False, "CLAUDE.md declares no gate:mtp-state=absent|present marker"
 
-    blocks = arch_blocks(model_cpp, "QWEN35")
-    if not blocks:
+    if not arch_blocks(model_cpp, "QWEN35"):
         return False, "no LLM_ARCH_QWEN35 case found -- arch missing entirely"
 
+    # Signals are deliberately NOT scoped to the `case LLM_ARCH_QWEN35:` block.
+    # Upstream made MTP generic (hparams.n_layer_nextn, layer.nextn.*, and an
+    # LLAMA_CONTEXT_TYPE_MTP context), so arch-scoped proxies reported a false
+    # PARTIAL once the real support landed. A plain global search for "nextn"
+    # is no good either: the pre-MTP tree already carried nextn tensors for
+    # GLM4_MOE and DeepSeek2 marked "preserved but unused". These three each
+    # discriminate: all were absent before MTP and present after.
     obs = {
-        "hparam": any("LLM_KV_NEXTN_PREDICT_LAYERS" in b for b in blocks),
-        "tensors": any(re.search(r"LLM_TENSOR_NEXTN|layer\.nextn", b) for b in blocks),
-        "graph": bool(re.search(r"nextn|\bmtp\b", qwen35_cpp, re.IGNORECASE)),
         "spec": ("DRAFT_MTP" in common_h or "COMMON_SPECULATIVE_TYPE_MTP" in common_h
                  or "draft-mtp" in arg_cpp),
+        "graph": bool(re.search(r"nextn|\bmtp\b", qwen35_cpp, re.IGNORECASE)),
+        "context": "LLAMA_CONTEXT_TYPE_MTP" in model_cpp,
     }
     present = [k for k, v in obs.items() if v]
     absent = [k for k, v in obs.items() if not v]
@@ -230,7 +285,7 @@ def parse_gitrepo(text):
 
 # Orgs we own and may push to. Everything else is fetch-only, no matter how
 # closely we work with it -- being a member is not authority.
-OWNED_ORGS = ["v-sekai-fire", "v-sekai-multiplayer-fabric"]
+OWNED_ORGS = ["v-sekai-fire", "v-sekai-multiplayer-fabric", "weftspun"]
 
 
 def check_remote_authority(push_urls):
@@ -465,12 +520,17 @@ def main():
     else:
         results.append(("model present", (False, "not found: %s" % args.model)))
 
+    # The blob-fingerprint base check is deliberately gone. It existed only to
+    # recover a base commit that git-subrepo's squash had thrown away. git
+    # subtree records the split commit, so provenance is now read rather than
+    # inferred, and the fingerprint became wrong by construction: the TurboQuant
+    # branch interleaves upstream and turbo commits and is continuously rebased,
+    # so no single upstream commit matches every clean file. A check that cannot
+    # pass is not a strict check, it is a broken one.
     if args.base:
-        results.append(("vendored base %s" % BASE_COMMIT, check_base(args.base, LC)))
-        results.append(("upstream MTP fix", check_mtp_upstream(args.base)))
+        results.append(guard("upstream MTP fix", lambda: check_mtp_upstream(args.base)))
     else:
-        unchecked.append("vendored base commit (pass --base UPSTREAM)")
-        unchecked.append("upstream MTP fix %s (pass --base UPSTREAM)" % MTP_UPSTREAM)
+        unchecked.append("upstream MTP fix %s (pass --base UPSTREAM_CLONE)" % MTP_UPSTREAM)
 
     failed = 0
     for name, (ok, detail) in results:

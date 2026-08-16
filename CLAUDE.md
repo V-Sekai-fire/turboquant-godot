@@ -273,7 +273,7 @@ machine-read by `check_claims.py`, which fails if the tree and the declaration
 disagree **in either direction**, or if a rebase lands only partially (nextn
 tensors loaded but no graph, say). Update it in the same change that lands MTP.
 
-<!-- gate:mtp-state=absent -->
+<!-- gate:mtp-state=present -->
 
 
 Work happens in a clone of `TheTom/llama-cpp-turboquant`, rebasing
@@ -281,6 +281,46 @@ Work happens in a clone of `TheTom/llama-cpp-turboquant`, rebasing
 here via `git subrepo pull`. Note that landing MTP in llama.cpp is necessary but
 not sufficient: `LLMChat` must also be taught to use `common/speculative`, or
 the module keeps its plain decode loop and sees none of the gain.
+
+## Standing techniques: network drive and durable token cache
+
+Two levers that change the economics and are easy to forget because neither
+shows up in a decode-rate benchmark.
+
+**Network drive.** A RunPod network volume holds the model once instead of
+baking 16.8 GB into every container image or re-pulling it per worker. Standard
+storage is $0.07/GB/mo, high-performance $0.14, so a 20 GB volume is $1.40 or
+$2.80 a month against $1.22/hr of serverless compute. The high-performance tier
+is worth the extra $1.40 here, because the volume is on the cold-start path.
+
+**Durable token cache.** Distinct from in-memory prefix caching, and the
+distinction is the whole point: durable state survives process exit and is
+shared between workers, so a long system prompt or a deep context is prefilled
+once ever rather than once per worker per cold start. The mechanisms are already
+in the tree:
+
+| mechanism | location | use |
+|---|---|---|
+| `--slot-save-path` | `common/arg.cpp` | server-side durable slot state |
+| `--prompt-cache`, `-all`, `-ro` | `common/arg.cpp` | durable prompt cache for the CLI |
+| `llama_state_seq_save_file` / `_load_file` | `include/llama.h` | C API, callable from `LLMChat` |
+
+Point `--slot-save-path` at the network volume and the durable cache becomes
+shared across serverless workers. For `modules/llm` the C API is the relevant
+one: `LLMChat` already keeps `cached_tokens` across turns in memory, but that
+dies with the process. `llama_state_seq_save_file` would let a save-game restore
+conversation KV instantly instead of re-prefilling on load.
+
+**TurboQuant multiplies both.** Quantized KV shrinks the saved state, which is
+simultaneously less to store on the volume and less to read back on a cold
+start. It also raises concurrent slots per GPU at fixed context — the README's
+own figure is 262K context in 22.2 GB on a 24 GB card with q4_0 KV, against
+failing past ~90K without.
+
+Note this pulls opposite to MTP. MTP forces `--parallel 1`, buying single-stream
+latency at the cost of throughput; turbo KV buys slots and therefore throughput.
+Single-user on-device wants MTP; multi-tenant serving wants turbo KV with MTP
+off. Do not assume one configuration serves both.
 
 ## Measuring MTP
 

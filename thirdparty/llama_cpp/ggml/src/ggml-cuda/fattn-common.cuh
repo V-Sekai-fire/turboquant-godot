@@ -45,6 +45,46 @@ typedef void (* fattn_kernel_t)(
 typedef float (*vec_dot_KQ_t)(
     const char * __restrict__ K_c, const void * __restrict__ Q_v, const int * __restrict__ Q_q8 , const void * __restrict__ Q_ds);
 
+struct ggml_cuda_flash_attn_ext_f16_extra_data {
+    uintptr_t K;
+    uintptr_t V;
+    uintptr_t end;
+};
+
+static inline ggml_cuda_flash_attn_ext_f16_extra_data ggml_cuda_flash_attn_ext_get_f16_extra_data(
+        const ggml_tensor * dst, const bool need_f16_K, const bool need_f16_V) {
+    GGML_ASSERT(dst->op == GGML_OP_FLASH_ATTN_EXT);
+
+    const ggml_tensor * K = dst->src[1];
+    const ggml_tensor * V = dst->src[2];
+
+    GGML_ASSERT(K != nullptr);
+    GGML_ASSERT(V != nullptr);
+
+    const bool V_is_K_view = V->view_src && (V->view_src == K || (V->view_src == K->view_src && V->view_offs == K->view_offs));
+
+    ggml_cuda_flash_attn_ext_f16_extra_data data = {};
+    data.end = (uintptr_t) dst->data + ggml_nbytes(dst);
+
+    if (need_f16_K && K->type != GGML_TYPE_F16) {
+        data.end = GGML_PAD(data.end, 128);
+        data.K   = data.end;
+        data.end += ggml_nelements(K)*ggml_type_size(GGML_TYPE_F16);
+    }
+
+    if (need_f16_V && V->type != GGML_TYPE_F16) {
+        if (V_is_K_view) {
+            data.V = data.K;
+        } else {
+            data.end = GGML_PAD(data.end, 128);
+            data.V   = data.end;
+            data.end += ggml_nelements(V)*ggml_type_size(GGML_TYPE_F16);
+        }
+    }
+
+    return data;
+}
+
 template <int D, int nthreads>
 static __device__ __forceinline__ float vec_dot_fattn_vec_KQ_f16(
     const char * __restrict__ K_c, const void * __restrict__ Q_v, const int * __restrict__ Q_q8 , const void * __restrict__ Q_ds_v) {
@@ -866,7 +906,7 @@ static __device__ __forceinline__ void dequantize_V_turbo4_0(const void * __rest
     const int     j0   = i0 % QK_TURBO4;
     const float   norm = __half2float(x[ib].norm);
 
-    static_assert(ne == 2 || ne == 4, "bad ne");
+    static_assert(ne == 2 || ne == 4 || ne == 8, "bad ne");
 
     if constexpr (ne == 4) {
         // j0 is always a multiple of 4 from the VEC kernel access pattern.
@@ -896,6 +936,55 @@ static __device__ __forceinline__ void dequantize_V_turbo4_0(const void * __rest
             ((float2 *) dst)[1] = make_float2(
                 TURBO_CENTROIDS_4BIT[idx2] * norm,
                 TURBO_CENTROIDS_4BIT[idx3] * norm);
+        } else {
+            static_assert(std::is_same_v<T, void>, "unsupported type");
+        }
+    } else if constexpr (ne == 8) {
+        // j0 is always a multiple of 8 from the VEC kernel access pattern.
+        // 8 consecutive elements span 4 qs bytes: j0/2 .. j0/2+3.
+        const uint8_t qs_byte0 = x[ib].qs[j0 / 2];
+        const uint8_t qs_byte1 = x[ib].qs[j0 / 2 + 1];
+        const uint8_t qs_byte2 = x[ib].qs[j0 / 2 + 2];
+        const uint8_t qs_byte3 = x[ib].qs[j0 / 2 + 3];
+
+        const uint8_t idx0 = (qs_byte0 >> 0) & 0xF;
+        const uint8_t idx1 = (qs_byte0 >> 4) & 0xF;
+        const uint8_t idx2 = (qs_byte1 >> 0) & 0xF;
+        const uint8_t idx3 = (qs_byte1 >> 4) & 0xF;
+        const uint8_t idx4 = (qs_byte2 >> 0) & 0xF;
+        const uint8_t idx5 = (qs_byte2 >> 4) & 0xF;
+        const uint8_t idx6 = (qs_byte3 >> 0) & 0xF;
+        const uint8_t idx7 = (qs_byte3 >> 4) & 0xF;
+
+#ifdef FP16_AVAILABLE
+        if constexpr (std::is_same_v<T, half>) {
+            ((half2 *) dst)[0] = make_half2(
+                __float2half(TURBO_CENTROIDS_4BIT[idx0] * norm),
+                __float2half(TURBO_CENTROIDS_4BIT[idx1] * norm));
+            ((half2 *) dst)[1] = make_half2(
+                __float2half(TURBO_CENTROIDS_4BIT[idx2] * norm),
+                __float2half(TURBO_CENTROIDS_4BIT[idx3] * norm));
+            ((half2 *) dst)[2] = make_half2(
+                __float2half(TURBO_CENTROIDS_4BIT[idx4] * norm),
+                __float2half(TURBO_CENTROIDS_4BIT[idx5] * norm));
+            ((half2 *) dst)[3] = make_half2(
+                __float2half(TURBO_CENTROIDS_4BIT[idx6] * norm),
+                __float2half(TURBO_CENTROIDS_4BIT[idx7] * norm));
+        } else
+#endif // FP16_AVAILABLE
+        if constexpr (std::is_same_v<T, float>) {
+            ((float2 *) dst)[0] = make_float2(
+                TURBO_CENTROIDS_4BIT[idx0] * norm,
+                TURBO_CENTROIDS_4BIT[idx1] * norm);
+            ((float2 *) dst)[1] = make_float2(
+                TURBO_CENTROIDS_4BIT[idx2] * norm,
+                TURBO_CENTROIDS_4BIT[idx3] * norm);
+            ((float2 *) dst)[2] = make_float2(
+                TURBO_CENTROIDS_4BIT[idx4] * norm,
+                TURBO_CENTROIDS_4BIT[idx5] * norm);
+            ((float2 *) dst)[3] = make_float2(
+                TURBO_CENTROIDS_4BIT[idx6] * norm,
+                TURBO_CENTROIDS_4BIT[idx7] * norm);
         } else {
             static_assert(std::is_same_v<T, void>, "unsupported type");
         }
@@ -975,7 +1064,10 @@ constexpr __device__ dequantize_V_t get_dequantize_V() {
 template <int ncols1>
 __launch_bounds__(FATTN_KQ_STRIDE/2, 1)
 static __global__ void flash_attn_mask_to_KV_max(
-        const half2 * __restrict__ mask, int * __restrict__ KV_max, const int ne30, const int s31, const int s33) {
+        const half2 * mask_ptr, int * KV_max_ptr, const int ne30, const int64_t s31, const int64_t s33) {
+    const half2 * GGML_CUDA_RESTRICT mask   = mask_ptr;
+    int         * GGML_CUDA_RESTRICT KV_max = KV_max_ptr;
+
     const int ne31     = gridDim.x;
     const int tid      = threadIdx.x;
     const int sequence = blockIdx.y;
@@ -1299,14 +1391,19 @@ void launch_fattn(
 
 #ifdef GGML_USE_HIP
     // HIP/ROCm: bypass the memory pool for f16 temp buffers.
-    // The legacy pool (ggml_cuda_pool_leg) retains peak-sized allocations permanently.
-    // For quantized KV dequant, this means the f16 temp buffer stays allocated,
-    // consuming more VRAM than the quantized KV compression saves — causing OOM.
-    // Using raw alloc+free ensures the memory is released after the kernel completes.
+    // The legacy pool (ggml_cuda_pool_leg) retains peak-sized allocations permanently
+    // because free() stores buffers for reuse rather than releasing them.
+    // On HIP without VMM support (RDNA 3/4), this means the f16 dequant temp buffers
+    // for quantized KV stay allocated after use, consuming more VRAM than the KV
+    // compression saves — causing OOM before f16 at equivalent context lengths.
+    // Using raw cudaMalloc/cudaFree ensures memory is released after the kernel completes.
+    // Ref: https://github.com/ggml-org/llama.cpp/issues/22107
     struct hip_f16_alloc {
         half * ptr = nullptr;
         cudaStream_t stream;
         hip_f16_alloc(cudaStream_t s) : stream(s) {}
+        hip_f16_alloc(const hip_f16_alloc &) = delete;
+        hip_f16_alloc & operator=(const hip_f16_alloc &) = delete;
         ~hip_f16_alloc() {
             if (ptr) {
                 cudaStreamSynchronize(stream);
@@ -1408,18 +1505,18 @@ void launch_fattn(
     // Only worth the overhead if there is at lease one FATTN_KQ_STRIDE x FATTN_KQ_STRIDE square to be skipped or
     //     multiple sequences of possibly different lengths.
     if (mask && K->ne[1] % FATTN_KQ_STRIDE == 0 && (Q->ne[1] >= 1024 || Q->ne[3] > 1)) {
-        const int s31 = mask->nb[1] / sizeof(half2);
-        const int s33 = mask->nb[3] / sizeof(half2);
+        const int64_t s31 = mask->nb[1] / sizeof(half2);
+        const int64_t s33 = mask->nb[3] / sizeof(half2);
 
         const dim3 blocks_num_KV_max(ntiles_x, Q->ne[3], 1);
         const dim3 block_dim_KV_max(FATTN_KQ_STRIDE/2, 1, 1);
 
         const int ne_KV_max = blocks_num_KV_max.x*blocks_num_KV_max.y;
         const int iter_k = K->ne[1] / FATTN_KQ_STRIDE;
-
         KV_max.alloc(ne_KV_max);
-        flash_attn_mask_to_KV_max<ncols1><<<blocks_num_KV_max, block_dim_KV_max, 0, main_stream>>>
-            ((const half2 *) mask->data, KV_max.ptr, iter_k, s31, s33);
+        ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(blocks_num_KV_max, block_dim_KV_max, 0, main_stream);
+        ggml_cuda_kernel_launch(flash_attn_mask_to_KV_max<ncols1>, launch_params,
+            (const half2 *) mask->data, KV_max.ptr, iter_k, s31, s33);
         CUDA_CHECK(cudaGetLastError());
     }
 

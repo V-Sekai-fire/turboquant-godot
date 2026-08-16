@@ -82,20 +82,27 @@ else()
         ../ggml-cuda/template-instances/fattn-vec-instance-q4_0-q4_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-q8_0-q8_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-bf16-bf16.cu
+        ../ggml-cuda/template-instances/fattn-vec-instance-f16-q8_0.cu
+        ../ggml-cuda/template-instances/fattn-vec-instance-q8_0-f16.cu
+        ../ggml-cuda/template-instances/fattn-vec-instance-bf16-q8_0.cu
+        ../ggml-cuda/template-instances/fattn-vec-instance-q8_0-bf16.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo3_0-turbo3_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo3_0-q8_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-q8_0-turbo3_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-f16-turbo3_0.cu
+        ../ggml-cuda/template-instances/fattn-vec-instance-turbo3_0-f16.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo2_0-turbo2_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo2_0-q8_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-q8_0-turbo2_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-f16-turbo2_0.cu
+        ../ggml-cuda/template-instances/fattn-vec-instance-turbo2_0-f16.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo3_0-turbo2_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo2_0-turbo3_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo4_0-turbo4_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo4_0-q8_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-q8_0-turbo4_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-f16-turbo4_0.cu
+        ../ggml-cuda/template-instances/fattn-vec-instance-turbo4_0-f16.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo4_0-turbo3_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo3_0-turbo4_0.cu
         ../ggml-cuda/template-instances/fattn-vec-instance-turbo4_0-turbo2_0.cu
@@ -134,10 +141,6 @@ if (GGML_HIP_NO_VMM)
     add_compile_definitions(GGML_HIP_NO_VMM)
 endif()
 
-if (GGML_HIP_ROCWMMA_FATTN)
-    add_compile_definitions(GGML_HIP_ROCWMMA_FATTN)
-endif()
-
 if (NOT GGML_HIP_MMQ_MFMA)
     add_compile_definitions(GGML_HIP_NO_MMQ_MFMA)
 endif()
@@ -149,6 +152,9 @@ endif()
 if (GGML_HIP_EXPORT_METRICS)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Rpass-analysis=kernel-resource-usage --save-temps")
 endif()
+
+# Fast math for HIP, like CUDA's -use_fast_math. Not -ffast-math: that implies -ffinite-math-only, which breaks ggml's INFINITY masking and produces NaNs.
+set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -funsafe-math-optimizations")
 
 if (NOT GGML_CUDA_FA)
     add_compile_definitions(GGML_CUDA_NO_FA)
