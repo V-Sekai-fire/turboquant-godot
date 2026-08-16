@@ -228,6 +228,48 @@ def parse_gitrepo(text):
     return out
 
 
+# Orgs we own and may push to. Everything else is fetch-only, no matter how
+# closely we work with it -- being a member is not authority.
+OWNED_ORGS = ["v-sekai-fire", "v-sekai-multiplayer-fabric"]
+
+
+def check_remote_authority(push_urls):
+    """No remote outside an owned org may have a live push URL.
+
+    Fetching from anyone is fine. Pushing is not, and a disabled push URL is
+    the guard, because a note in a document does not stop a push.
+    """
+    offenders = []
+    for repo, name, url in push_urls:
+        if url.startswith("DISABLED"):
+            continue
+        low = url.lower()
+        if not any(("/%s/" % o) in low or (":%s/" % o) in low for o in OWNED_ORGS):
+            offenders.append("%s:%s -> %s" % (repo, name, url))
+    if offenders:
+        return False, "push URL outside owned orgs: %s" % "; ".join(offenders[:3])
+    return True, "%d push URLs, all owned or disabled" % len(push_urls)
+
+
+def read_push_urls(repo_root):
+    """(repo, remote, push URL) for this repo and any sibling repos beside it."""
+    roots = [repo_root]
+    parent = os.path.dirname(repo_root)
+    if os.path.isdir(parent):
+        for entry in sorted(os.listdir(parent)):
+            p = os.path.join(parent, entry)
+            if p != repo_root and os.path.isdir(os.path.join(p, ".git")):
+                roots.append(p)
+    out = []
+    for r in roots:
+        res = subprocess.run(["git", "-C", r, "remote", "-v"], capture_output=True, text=True)
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[2] == "(push)":
+                out.append((os.path.basename(r), parts[0], parts[1]))
+    return out
+
+
 def check_subtree_doc(split, remotes, gitrepo_exists, claude_text):
     """CLAUDE.md must restate the subtree split point that git itself records.
 
@@ -335,6 +377,15 @@ def self_test():
             "abc123def456", ["origin https://example.com/other"], False, "abc123def456")),
         ("guard: missing file is a FAIL", lambda: guard(
             "x", lambda: read("/nonexistent/path/file"))[1]),
+        # Being a member of an org is not authority over it.
+        ("authority: upstream push URL", lambda: check_remote_authority(
+            [("r", "upstream", "https://github.com/godotengine/godot")])),
+        ("authority: collaborator fork", lambda: check_remote_authority(
+            [("r", "turboquant", "https://github.com/TheTom/llama-cpp-turboquant.git")])),
+        ("authority: ssh form", lambda: check_remote_authority(
+            [("r", "x", "git@github.com:sudoingX/qwen38-mtp.git")])),
+        ("authority: lookalike org", lambda: check_remote_authority(
+            [("r", "x", "https://github.com/v-sekai-fire-evil/turboquant-godot")])),
         # The state gate must fail in BOTH directions and on partial rebases,
         # otherwise it is a one-way assertion that rots the moment work lands.
         ("state: declared absent, tree present", lambda: check_mtp_state(
@@ -383,6 +434,9 @@ def main():
         return self_test()
 
     results, unchecked = [], []
+
+    results.append(guard("push remotes are owned",
+                         lambda: check_remote_authority(read_push_urls(REPO))))
 
     results.append(guard("subtree doc matches git", lambda: check_subtree_doc(
         *read_subtree_state(REPO), claude_text=read(os.path.join(REPO, "CLAUDE.md")))))

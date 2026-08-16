@@ -174,6 +174,35 @@ There is no small Qwen3.8 — Qwen shipped only `Qwen3.8-27B` and
 small Qwen3.5 exercises the identical `qwen35` MTP path when a fast loop is
 wanted.
 
+## Push authority
+
+We push only to orgs we **own**. Being a member or a close collaborator is not
+authority.
+
+| org | rights |
+|---|---|
+| `V-Sekai-fire` | owned, push allowed |
+| `v-sekai-multiplayer-fabric` | owned, push allowed |
+| everything else (`godotengine`, `ggml-org`, `TheTom`, `sudoingX`, …) | fetch only |
+
+Fetching from anyone is fine. The guard is mechanical rather than advisory:
+every remote outside an owned org has its push URL set to
+`DISABLED-not-our-org-fetch-only`, so a push fails instead of landing somewhere
+we do not control. `check_claims.py` asserts this across this repo and every
+sibling repo in the workspace, scratch clones included — that check found live
+push URLs on two throwaway clones that were easy to forget.
+
+Adding a remote is therefore two steps: `git remote add`, then
+`git remote set-url --push <name> DISABLED-not-our-org-fetch-only` unless it is
+an owned org.
+
+### Consequence for the rebase
+
+The TurboQuant rebase **cannot** be pushed to `TheTom/llama-cpp-turboquant`.
+Fork or mirror that branch into `V-Sekai-fire` first, rebase there, and pull the
+subtree from our own fork. The `turboquant` remote here stays fetch-only and
+exists purely to read the fork's history.
+
 ## Where inference runs
 
 `.repo/manifests/CLAUDE.md` states GPU work runs on RunPod, never on the local
