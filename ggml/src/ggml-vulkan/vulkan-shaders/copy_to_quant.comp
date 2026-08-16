@@ -5,7 +5,7 @@
 #extension GL_KHR_shader_subgroup_shuffle : enable
 #include "types.glsl"
 
-#if defined(SET_ROWS) && defined(DATA_A_TURBO3_0)
+#if defined(SET_ROWS) && (defined(DATA_A_TURBO2_0) || defined(DATA_A_TURBO3_0) || defined(DATA_A_TURBO4_0))
 layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 const uint BLOCK_SIZE = 128;
 #elif defined(SET_ROWS) && QUANT_K == 1
@@ -16,7 +16,7 @@ layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 const uint BLOCK_SIZE = 32;
 #endif
 
-layout (binding = 0) readonly buffer S {float data_s[];};
+layout (binding = 0) readonly buffer S {S_TYPE data_s[];};
 
 #if defined(SET_ROWS)
 #include "generic_binary_head.glsl"
@@ -41,7 +41,7 @@ void quantize(uint dst_idx, uint src_idx)
     float vmax = 0.0;
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q4_0; ++j) {
-        const float v = data_s[src_idx + j];
+        const float v = float(data_s[src_idx + j]);
         if (amax < abs(v)) {
             amax = abs(v);
             vmax = v;
@@ -54,8 +54,8 @@ void quantize(uint dst_idx, uint src_idx)
     data_q[dst_idx].d = float16_t(d);
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q4_0/2; ++j) {
-        const float x0 = data_s[src_idx + 0              + j]*id;
-        const float x1 = data_s[src_idx + QUANT_K_Q4_0/2 + j]*id;
+        const float x0 = float(data_s[src_idx + 0              + j])*id;
+        const float x1 = float(data_s[src_idx + QUANT_K_Q4_0/2 + j])*id;
 
         const uint xi0 = min(15, int(x0 + 8.5));
         const uint xi1 = min(15, int(x1 + 8.5));
@@ -72,7 +72,7 @@ void quantize(uint dst_idx, uint src_idx)
     float vmax = -vmin;
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q4_1; ++j) {
-        const float v = data_s[src_idx + j];
+        const float v = float(data_s[src_idx + j]);
 
         if (v < vmin) vmin = v;
         if (v > vmax) vmax = v;
@@ -85,8 +85,8 @@ void quantize(uint dst_idx, uint src_idx)
     data_q[dst_idx].m = float16_t(vmin);
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q4_1/2; ++j) {
-        const float x0 = (data_s[src_idx + 0              + j] - vmin)*id;
-        const float x1 = (data_s[src_idx + QUANT_K_Q4_1/2 + j] - vmin)*id;
+        const float x0 = (float(data_s[src_idx + 0              + j]) - vmin)*id;
+        const float x1 = (float(data_s[src_idx + QUANT_K_Q4_1/2 + j]) - vmin)*id;
 
         const uint xi0 = min(15, int(x0 + 0.5));
         const uint xi1 = min(15, int(x1 + 0.5));
@@ -103,7 +103,7 @@ void quantize(uint dst_idx, uint src_idx)
     float vmax = 0.0;
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q5_0; ++j) {
-        const float v = data_s[src_idx + j];
+        const float v = float(data_s[src_idx + j]);
         if (amax < abs(v)) {
             amax = abs(v);
             vmax = v;
@@ -117,8 +117,8 @@ void quantize(uint dst_idx, uint src_idx)
 
     uint32_t qh = 0;
     [[unroll]] for (int j = 0; j < QUANT_K_Q5_0/2; ++j) {
-        const float x0 = data_s[src_idx + 0              + j]*id;
-        const float x1 = data_s[src_idx + QUANT_K_Q5_0/2 + j]*id;
+        const float x0 = float(data_s[src_idx + 0              + j])*id;
+        const float x1 = float(data_s[src_idx + QUANT_K_Q5_0/2 + j])*id;
 
         const uint xi0 = min(31, int(x0 + 16.5));
         const uint xi1 = min(31, int(x1 + 16.5));
@@ -135,11 +135,11 @@ void quantize(uint dst_idx, uint src_idx)
 #if defined(DATA_A_Q5_1)
 void quantize(uint dst_idx, uint src_idx)
 {
-    float min = data_s[src_idx + 0];
+    float min = float(data_s[src_idx + 0]);
     float max = min;
 
     [[unroll]] for (int j = 1; j < QUANT_K_Q5_1; ++j) {
-        const float v = data_s[src_idx + j];
+        const float v = float(data_s[src_idx + j]);
         min = v < min ? v : min;
         max = v > max ? v : max;
     }
@@ -152,8 +152,8 @@ void quantize(uint dst_idx, uint src_idx)
 
     uint32_t qh = 0;
     [[unroll]] for (int j = 0; j < QUANT_K_Q5_1/2; ++j) {
-        const float x0 = (data_s[src_idx + 0              + j] - min)*id;
-        const float x1 = (data_s[src_idx + QUANT_K_Q5_1/2 + j] - min)*id;
+        const float x0 = (float(data_s[src_idx + 0              + j]) - min)*id;
+        const float x1 = (float(data_s[src_idx + QUANT_K_Q5_1/2 + j]) - min)*id;
 
         const uint xi0 = uint(x0 + 0.5);
         const uint xi1 = uint(x1 + 0.5);
@@ -172,7 +172,7 @@ void quantize(uint dst_idx, uint src_idx)
     float amax = 0.0; // absolute max
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q8_0; j++) {
-        const float v = data_s[src_idx + j];
+        const float v = float(data_s[src_idx + j]);
         amax = max(amax, abs(v));
     }
 
@@ -182,7 +182,7 @@ void quantize(uint dst_idx, uint src_idx)
     data_q[dst_idx].d = float16_t(d);
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q8_0; ++j) {
-        const float x0 = data_s[src_idx + j]*id;
+        const float x0 = float(data_s[src_idx + j])*id;
 
         data_q[dst_idx].qs[j] = int8_t(round(x0));
     }
@@ -195,7 +195,7 @@ void quantize(uint dst_idx, uint src_idx)
     float sum_abs = 0.0;
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q1_0; j++) {
-        sum_abs += abs(data_s[src_idx + j]);
+        sum_abs += abs(float(data_s[src_idx + j]));
     }
 
     const float d = sum_abs / QUANT_K_Q1_0;
@@ -207,13 +207,42 @@ void quantize(uint dst_idx, uint src_idx)
     }
 
     [[unroll]] for (int j = 0; j < QUANT_K_Q1_0; ++j) {
-        if (data_s[src_idx + j] >= 0.0) {
+        if (float(data_s[src_idx + j]) >= 0.0) {
             data_q[dst_idx].qs[j / 8] |= uint8_t(1 << (j % 8));
         }
     }
 }
 #endif
 
+#if defined(DATA_A_Q2_0)
+uint quantize_q2_0(float x)
+{
+    const int q = int(x >= 0.0f ? floor(x + 0.5f) : ceil(x - 0.5f)) + 1;
+    return uint(clamp(q, 0, 3));
+}
+
+void quantize(uint dst_idx, uint src_idx)
+{
+    float amax = 0.0f;
+
+    [[unroll]] for (int j = 0; j < QUANT_K_Q2_0; ++j) {
+        amax = max(amax, abs(float(data_s[src_idx + j])));
+    }
+
+    const float d = amax;
+    const float id = d != 0.0f ? 1.0f / d : 0.0f;
+
+    data_q[dst_idx].d = float16_t(d);
+
+    [[unroll]] for (int j = 0; j < QUANT_K_Q2_0 / 4; ++j) {
+        const uint q0 = quantize_q2_0(float(data_s[src_idx + 4*j    ]) * id);
+        const uint q1 = quantize_q2_0(float(data_s[src_idx + 4*j + 1]) * id);
+        const uint q2 = quantize_q2_0(float(data_s[src_idx + 4*j + 2]) * id);
+        const uint q3 = quantize_q2_0(float(data_s[src_idx + 4*j + 3]) * id);
+        data_q[dst_idx].qs[j] = uint8_t(q0 | (q1 << 2u) | (q2 << 4u) | (q3 << 6u));
+    }
+}
+#endif
 #if defined(DATA_A_TURBO3_0)
 const float TS1[128] = float[128](
     -1,  1,  1, -1, -1,  1, -1,  1, -1, -1,  1,  1,  1,  1,  1,  1,
@@ -335,7 +364,7 @@ void quantize(uint dst_idx, uint src_idx)
     float vmax = 0.0;
 
     [[unroll]] for (int j = 0; j < QUANT_K_IQ4_NL; ++j) {
-        const float v = data_s[src_idx + j];
+        const float v = float(data_s[src_idx + j]);
         if (amax < abs(v)) {
             amax = abs(v);
             vmax = v;
@@ -347,16 +376,16 @@ void quantize(uint dst_idx, uint src_idx)
 
     float sumqx = 0, sumq2 = 0;
     [[unroll]] for (int j = 0; j < QUANT_K_IQ4_NL/2; ++j) {
-        const float x0 = data_s[src_idx + 0                + j]*id;
-        const float x1 = data_s[src_idx + QUANT_K_IQ4_NL/2 + j]*id;
+        const float x0 = float(data_s[src_idx + 0                + j])*id;
+        const float x1 = float(data_s[src_idx + QUANT_K_IQ4_NL/2 + j])*id;
         const uint xi0 = best_index(x0);
         const uint xi1 = best_index(x1);
         data_q[dst_idx].qs[j] = uint8_t(xi0 | (xi1 << 4));
         const float v0 = kvalues_iq4nl[xi0];
         const float v1 = kvalues_iq4nl[xi1];
-        const float w0 = data_s[src_idx + 0                + j]*data_s[src_idx + 0                + j];
-        const float w1 = data_s[src_idx + QUANT_K_IQ4_NL/2 + j]*data_s[src_idx + QUANT_K_IQ4_NL/2 + j];
-        sumqx += w0*v0*data_s[src_idx + j] + w1*v1*data_s[src_idx + QUANT_K_IQ4_NL/2 + j];
+        const float w0 = float(data_s[src_idx + 0                + j])*float(data_s[src_idx + 0                + j]);
+        const float w1 = float(data_s[src_idx + QUANT_K_IQ4_NL/2 + j])*float(data_s[src_idx + QUANT_K_IQ4_NL/2 + j]);
+        sumqx += w0*v0*float(data_s[src_idx + j]) + w1*v1*float(data_s[src_idx + QUANT_K_IQ4_NL/2 + j]);
         sumq2 += w0*v0*v0 + w1*v1*v1;
     }
 
@@ -368,14 +397,14 @@ void quantize(uint dst_idx, uint src_idx)
 #if defined(DATA_A_F32) || defined(DATA_A_F16)
 void quantize(uint dst_idx, uint src_idx)
 {
-    data_q[dst_idx] = A_TYPE(data_s[src_idx]);
+    data_q[dst_idx] = A_TYPE(float(data_s[src_idx]));
 }
 #endif
 
 #if defined(DATA_A_BF16)
 void quantize(uint dst_idx, uint src_idx)
 {
-    data_q[dst_idx] = A_TYPE(fp32_to_bf16(data_s[src_idx]));
+    data_q[dst_idx] = A_TYPE(fp32_to_bf16(float(data_s[src_idx])));
 }
 #endif
 
@@ -386,13 +415,16 @@ void main() {
     const uint gpr = p.ne00 / 128;
 
     if (gpr == 0) return;
-    if (g >= p.ne / 128) return;
+    if (g >= gpr * p.ne21 * p.ne22 * p.ne23) return;
 
     uint tmp = g;
     const uint ig  = tmp % gpr; tmp /= gpr;
     const uint i01 = tmp % p.ne01; tmp /= p.ne01;
-    const uint i02 = tmp % p.ne12;
-    const uint i03 = tmp / p.ne12;
+    const uint i02 = tmp % p.ne02;
+    const uint i03 = tmp / p.ne02;
+
+    // Bail if dispatch slot maps past source extents (broadcast expansion)
+    if (i01 >= p.ne01 || i02 >= p.ne02 || i03 >= p.ne03) return;
 
     const uint sb  = src0_idx(ig * 128, i01, i02, i03) + get_aoffset();
     const uint i1  = data_i[src1_idx(i01, fastmod(i02, p.ne11), fastmod(i03, p.ne12), 0) + get_boffset()] DATA_I_SWIZZLE;
@@ -450,11 +482,19 @@ void main() {
         data_q[db].qs[t / 4u] = uint8_t(qs_byte);
     }
 
-    // Pack signs: 8 elements per byte via subgroup ballot
+    // Pack signs: 8 elements per byte via subgroup ballot.
+    // The ballot result is a uvec4 with one bit per subgroup lane, 32 lanes per
+    // component. On wave32 every lane's bit is in ballot.x, but on wave64
+    // (GCN/Polaris) lanes 32-63 land in ballot.y - indexing .x with a shift of
+    // (sg_lane/8)*8 >= 32 is UB and reads the wrong lanes' bits, corrupting
+    // half of every signs byte at write time (#241). Select the component by
+    // lane/32 and the byte within it by (lane%32)/8, valid for any subgroup
+    // size that is a multiple of 8.
     uvec4 ballot = subgroupBallot(((idx >> 2u) & 1u) != 0u);
     if (sg_lane % 8u == 0u) {
-        uint local_byte = sg_lane / 8u;
-        data_q[db].signs[t / 8u] = uint8_t((ballot.x >> (local_byte * 8u)) & 0xFFu);
+        uint ballot_word   = sg_lane / 32u;
+        uint byte_in_word  = (sg_lane % 32u) / 8u;
+        data_q[db].signs[t / 8u] = uint8_t((ballot[ballot_word] >> (byte_in_word * 8u)) & 0xFFu);
     }
 
     // Step 7: reconstruction norm via subgroup reduction
@@ -469,6 +509,245 @@ void main() {
         data_q[db].norm = float16_t((rn > 1e-10) ? (gnrm / rn) : gnrm);
     }
 }
+#elif defined(SET_ROWS) && defined(DATA_A_TURBO2_0)
+// Mirror of the TURBO3_0 block above, adapted for turbo2 (4 centroids,
+// 2-bit pack, no signs byte). WHT tables and reduction structure are
+// identical (QK = 128 for both).
+const float TS1_T2[128] = float[128](
+    -1,  1,  1, -1, -1,  1, -1,  1, -1, -1,  1,  1,  1,  1,  1,  1,
+     1, -1,  1, -1,  1, -1, -1,  1,  1,  1, -1,  1,  1, -1, -1, -1,
+    -1,  1,  1, -1,  1,  1, -1,  1, -1,  1,  1, -1, -1,  1, -1,  1,
+     1,  1,  1, -1, -1, -1, -1, -1,  1, -1,  1,  1,  1,  1, -1,  1,
+    -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1,  1,
+     1, -1, -1,  1,  1,  1, -1, -1,  1,  1, -1,  1,  1, -1,  1, -1,
+    -1,  1,  1, -1,  1, -1,  1, -1,  1,  1,  1,  1, -1,  1, -1,  1,
+     1, -1,  1,  1, -1, -1, -1, -1, -1,  1,  1, -1,  1,  1, -1,  1
+);
+const float TS2_T2[128] = float[128](
+     1,  1,  1,  1, -1,  1,  1, -1,  1, -1, -1, -1,  1, -1, -1, -1,
+     1,  1, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1,  1,  1,  1,
+     1,  1, -1, -1, -1,  1, -1, -1, -1, -1, -1, -1,  1,  1,  1, -1,
+     1, -1,  1,  1,  1, -1, -1,  1, -1, -1, -1, -1, -1, -1,  1,  1,
+     1, -1,  1, -1, -1, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1,  1,
+    -1,  1, -1,  1,  1, -1,  1, -1, -1, -1, -1,  1, -1, -1,  1, -1,
+     1, -1,  1,  1,  1, -1, -1,  1, -1,  1, -1,  1,  1, -1, -1,  1,
+    -1,  1, -1,  1,  1, -1,  1, -1,  1, -1, -1, -1, -1, -1,  1, -1
+);
+const float TINV_T2 = 0.08838834764831845;  // 1 / sqrt(128)
+// Lloyd-Max centroids for N(0, 1/128), 4 levels (matches CENTROIDS_2BIT in C ref)
+const float TC2[4] = float[4](-0.133462, -0.039994, 0.039994, 0.133462);
+// Midpoints between adjacent centroids
+const float TM2[3] = float[3](-0.086728, 0.0, 0.086728);
+
+shared float wht_t2[128];
+shared float sg_acc_t2[16];
+shared float gnrm_t2;
+
+void main() {
+    const uint t   = gl_LocalInvocationID.x;
+    const uint g   = gl_WorkGroupID.z * 262144 + gl_WorkGroupID.y * 512 + gl_WorkGroupID.x;
+    const uint gpr = p.ne00 / 128;
+
+    if (gpr == 0) return;
+    if (g >= gpr * p.ne21 * p.ne22 * p.ne23) return;
+
+    uint tmp = g;
+    const uint ig  = tmp % gpr; tmp /= gpr;
+    const uint i01 = tmp % p.ne01; tmp /= p.ne01;
+    const uint i02 = tmp % p.ne02;
+    const uint i03 = tmp / p.ne02;
+
+    // Bail if dispatch slot maps past source extents (broadcast expansion)
+    if (i01 >= p.ne01 || i02 >= p.ne02 || i03 >= p.ne03) return;
+
+    const uint sb  = src0_idx(ig * 128, i01, i02, i03) + get_aoffset();
+    const uint i1  = data_i[src1_idx(i01, fastmod(i02, p.ne11), fastmod(i03, p.ne12), 0) + get_boffset()] DATA_I_SWIZZLE;
+    const uint db  = dst_idx(ig, i1, i02, i03) + get_doffset();
+
+    wht_t2[t] = data_s[sb + t];
+    barrier();
+
+    float v2 = wht_t2[t] * wht_t2[t];
+    v2 = subgroupAdd(v2);
+    if (gl_SubgroupInvocationID == 0) sg_acc_t2[gl_SubgroupID] = v2;
+    barrier();
+    if (t == 0) {
+        float total = 0.0;
+        for (uint w = 0; w < gl_NumSubgroups; w++) total += sg_acc_t2[w];
+        gnrm_t2 = sqrt(total);
+    }
+    barrier();
+
+    wht_t2[t] *= (gnrm_t2 > 1e-10) ? (1.0 / gnrm_t2) : 0.0;
+    barrier();
+
+    wht_t2[t] *= TS1_T2[t];
+    barrier();
+
+    [[unroll]] for (uint h = 1; h < 128; h *= 2) {
+        if ((t % (2 * h)) < h) {
+            float a    = wht_t2[t];
+            float b    = wht_t2[t + h];
+            wht_t2[t]     = a + b;
+            wht_t2[t + h] = a - b;
+        }
+        barrier();
+    }
+
+    float rv = wht_t2[t] * TINV_T2 * TS2_T2[t];
+
+    // Quantize to nearest of 4 centroids (2-bit index, no signs byte)
+    uint idx = rv < TM2[0] ? 0u : rv < TM2[1] ? 1u : rv < TM2[2] ? 2u : 3u;
+
+    // Pack qs: 4 elements per byte (full 2-bit each, no high bit)
+    uint sg_lane = gl_SubgroupInvocationID;
+    uint qs_byte = 0u;
+    [[unroll]] for (uint k = 0; k < 4; k++) {
+        uint contrib = subgroupShuffle(idx & 0x3u, (sg_lane & ~3u) + k);
+        qs_byte |= contrib << (k * 2u);
+    }
+    if (sg_lane % 4u == 0u) {
+        data_q[db].qs[t / 4u] = uint8_t(qs_byte);
+    }
+
+    // Reconstruction norm via subgroup reduction
+    float rc = TC2[idx] * TC2[idx];
+    rc = subgroupAdd(rc);
+    if (sg_lane == 0u) sg_acc_t2[gl_SubgroupID] = rc;
+    barrier();
+    if (t == 0u) {
+        float total = 0.0;
+        for (uint w = 0; w < gl_NumSubgroups; w++) total += sg_acc_t2[w];
+        float rn = sqrt(total);
+        data_q[db].norm = float16_t((rn > 1e-10) ? (gnrm_t2 / rn) : gnrm_t2);
+    }
+}
+
+#elif defined(SET_ROWS) && defined(DATA_A_TURBO4_0)
+// Mirror of the TURBO3_0 block above, adapted for turbo4 (16 centroids,
+// 4-bit nibble pack, no signs byte). WHT tables and reduction structure
+// are identical (QK = 128 for both).
+const float TS1_T4[128] = float[128](
+    -1,  1,  1, -1, -1,  1, -1,  1, -1, -1,  1,  1,  1,  1,  1,  1,
+     1, -1,  1, -1,  1, -1, -1,  1,  1,  1, -1,  1,  1, -1, -1, -1,
+    -1,  1,  1, -1,  1,  1, -1,  1, -1,  1,  1, -1, -1,  1, -1,  1,
+     1,  1,  1, -1, -1, -1, -1, -1,  1, -1,  1,  1,  1,  1, -1,  1,
+    -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1, -1, -1, -1,  1,  1,
+     1, -1, -1,  1,  1,  1, -1, -1,  1,  1, -1,  1,  1, -1,  1, -1,
+    -1,  1,  1, -1,  1, -1,  1, -1,  1,  1,  1,  1, -1,  1, -1,  1,
+     1, -1,  1,  1, -1, -1, -1, -1, -1,  1,  1, -1,  1,  1, -1,  1
+);
+const float TS2_T4[128] = float[128](
+     1,  1,  1,  1, -1,  1,  1, -1,  1, -1, -1, -1,  1, -1, -1, -1,
+     1,  1, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1, -1,  1,  1,  1,
+     1,  1, -1, -1, -1,  1, -1, -1, -1, -1, -1, -1,  1,  1,  1, -1,
+     1, -1,  1,  1,  1, -1, -1,  1, -1, -1, -1, -1, -1, -1,  1,  1,
+     1, -1,  1, -1, -1, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1,  1,
+    -1,  1, -1,  1,  1, -1,  1, -1, -1, -1, -1,  1, -1, -1,  1, -1,
+     1, -1,  1,  1,  1, -1, -1,  1, -1,  1, -1,  1,  1, -1, -1,  1,
+    -1,  1, -1,  1,  1, -1,  1, -1,  1, -1, -1, -1, -1, -1,  1, -1
+);
+const float TINV_T4 = 0.08838834764831845;  // 1 / sqrt(128)
+// Lloyd-Max centroids for N(0, 1/128), 16 levels (matches CENTROIDS_4BIT in C ref)
+const float TC4[16] = float[16](
+    -0.241529, -0.182877, -0.143016, -0.111036,
+    -0.083292, -0.058050, -0.034299, -0.011349,
+     0.011349,  0.034299,  0.058050,  0.083292,
+     0.111036,  0.143016,  0.182877,  0.241529
+);
+// 15 midpoints between adjacent centroids (matches nearest_centroid_4bit in C ref)
+const float TM4[15] = float[15](
+    -0.212203, -0.162947, -0.127026, -0.097164,
+    -0.070671, -0.046174, -0.022824,  0.0,
+     0.022824,  0.046174,  0.070671,  0.097164,
+     0.127026,  0.162947,  0.212203
+);
+
+shared float wht_t4[128];
+shared float sg_acc_t4[16];
+shared float gnrm_t4;
+
+void main() {
+    const uint t   = gl_LocalInvocationID.x;
+    const uint g   = gl_WorkGroupID.z * 262144 + gl_WorkGroupID.y * 512 + gl_WorkGroupID.x;
+    const uint gpr = p.ne00 / 128;
+
+    if (gpr == 0) return;
+    if (g >= gpr * p.ne21 * p.ne22 * p.ne23) return;
+
+    uint tmp = g;
+    const uint ig  = tmp % gpr; tmp /= gpr;
+    const uint i01 = tmp % p.ne01; tmp /= p.ne01;
+    const uint i02 = tmp % p.ne02;
+    const uint i03 = tmp / p.ne02;
+
+    // Bail if dispatch slot maps past source extents (broadcast expansion)
+    if (i01 >= p.ne01 || i02 >= p.ne02 || i03 >= p.ne03) return;
+
+    const uint sb  = src0_idx(ig * 128, i01, i02, i03) + get_aoffset();
+    const uint i1  = data_i[src1_idx(i01, fastmod(i02, p.ne11), fastmod(i03, p.ne12), 0) + get_boffset()] DATA_I_SWIZZLE;
+    const uint db  = dst_idx(ig, i1, i02, i03) + get_doffset();
+
+    wht_t4[t] = data_s[sb + t];
+    barrier();
+
+    float v2 = wht_t4[t] * wht_t4[t];
+    v2 = subgroupAdd(v2);
+    if (gl_SubgroupInvocationID == 0) sg_acc_t4[gl_SubgroupID] = v2;
+    barrier();
+    if (t == 0) {
+        float total = 0.0;
+        for (uint w = 0; w < gl_NumSubgroups; w++) total += sg_acc_t4[w];
+        gnrm_t4 = sqrt(total);
+    }
+    barrier();
+
+    wht_t4[t] *= (gnrm_t4 > 1e-10) ? (1.0 / gnrm_t4) : 0.0;
+    barrier();
+
+    wht_t4[t] *= TS1_T4[t];
+    barrier();
+
+    [[unroll]] for (uint h = 1; h < 128; h *= 2) {
+        if ((t % (2 * h)) < h) {
+            float a    = wht_t4[t];
+            float b    = wht_t4[t + h];
+            wht_t4[t]     = a + b;
+            wht_t4[t + h] = a - b;
+        }
+        barrier();
+    }
+
+    float rv = wht_t4[t] * TINV_T4 * TS2_T4[t];
+
+    // Quantize to nearest of 16 centroids (4-bit index, no signs byte)
+    uint idx = 0u;
+    [[unroll]] for (uint i = 0; i < 15; i++) {
+        if (rv >= TM4[i]) idx = i + 1u;
+    }
+
+    // Pack qs: 2 elements per byte (4-bit nibble each)
+    uint sg_lane = gl_SubgroupInvocationID;
+    uint pair_low  = subgroupShuffle(idx & 0xFu, sg_lane & ~1u);
+    uint pair_high = subgroupShuffle(idx & 0xFu, (sg_lane & ~1u) + 1u);
+    uint qs_byte = pair_low | (pair_high << 4u);
+    if (sg_lane % 2u == 0u) {
+        data_q[db].qs[t / 2u] = uint8_t(qs_byte);
+    }
+
+    // Reconstruction norm via subgroup reduction
+    float rc = TC4[idx] * TC4[idx];
+    rc = subgroupAdd(rc);
+    if (sg_lane == 0u) sg_acc_t4[gl_SubgroupID] = rc;
+    barrier();
+    if (t == 0u) {
+        float total = 0.0;
+        for (uint w = 0; w < gl_NumSubgroups; w++) total += sg_acc_t4[w];
+        float rn = sqrt(total);
+        data_q[db].norm = float16_t((rn > 1e-10) ? (gnrm_t4 / rn) : gnrm_t4);
+    }
+}
+
 #elif defined(SET_ROWS) && defined(DATA_A_TQ4_1S)
 
 void main() {
@@ -477,13 +756,16 @@ void main() {
     const uint gpr = p.ne00 / 32;  // blocks per row
 
     if (gpr == 0) return;
-    if (g >= p.ne / 32) return;
+    if (g >= gpr * p.ne21 * p.ne22 * p.ne23) return;
 
     uint tmp = g;
     const uint ig  = tmp % gpr; tmp /= gpr;
     const uint i01 = tmp % p.ne01; tmp /= p.ne01;
-    const uint i02 = tmp % p.ne12;
-    const uint i03 = tmp / p.ne12;
+    const uint i02 = tmp % p.ne02;
+    const uint i03 = tmp / p.ne02;
+
+    // Bail if dispatch slot maps past source extents (broadcast expansion)
+    if (i01 >= p.ne01 || i02 >= p.ne02 || i03 >= p.ne03) return;
 
     const uint sb  = src0_idx(ig * 32, i01, i02, i03) + get_aoffset();
     const uint i1  = data_i[src1_idx(i01, fastmod(i02, p.ne11), fastmod(i03, p.ne12), 0) + get_boffset()] DATA_I_SWIZZLE;

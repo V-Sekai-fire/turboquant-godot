@@ -1,9 +1,9 @@
 #include "common.cuh"
 #include "fattn-common.cuh"
 #include "fattn-mma-f16.cuh"
+#include "fattn-mma-turbo.cuh"
 #include "fattn-tile.cuh"
 #include "fattn-vec.cuh"
-#include "fattn-wmma-f16.cuh"
 #include "fattn.cuh"
 
 template <int DKQ, int DV, int ncols2>
@@ -19,13 +19,14 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1(ggml_backend_cuda_con
     }
 
     if constexpr (ncols2 <= 16) {
-        if ((turing_mma_available(cc) || amd_wmma_available(cc)) && Q->ne[1] <= 16/ncols2) {
+        if (Q->ne[1] <= 16/ncols2) {
             ggml_cuda_flash_attn_ext_mma_f16_case<DKQ, DV, 16/ncols2, ncols2>(ctx, dst);
             return;
         }
     }
 
-    if (ggml_cuda_highest_compiled_arch(cc) == GGML_CUDA_CC_TURING || amd_wmma_available(cc) || Q->ne[1] <= 32/ncols2) {
+    if (Q->ne[1] <= 32/ncols2 || (GGML_CUDA_CC_IS_NVIDIA(cc) && ggml_cuda_highest_compiled_arch(cc) == GGML_CUDA_CC_TURING) ||
+            (GGML_CUDA_CC_IS_AMD(cc) && DKQ > 256)) {
         ggml_cuda_flash_attn_ext_mma_f16_case<DKQ, DV, 32/ncols2, ncols2>(ctx, dst);
         return;
     }
@@ -98,16 +99,100 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2(ggml_backend_cuda_con
         return;
     }
 
-    if constexpr (DKQ <= 256) {
-        if (use_gqa_opt && gqa_ratio > 1) {
-            ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 2>(ctx, dst);
-            return;
-        }
+    if (use_gqa_opt && gqa_ratio > 1) {
+        ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 2>(ctx, dst);
+        return;
+    }
 
+    if constexpr (DKQ <= 256) {
         ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<DKQ, DV, 1>(ctx, dst);
     } else {
         GGML_ABORT("fatal error");
     }
+}
+
+// ---------------------------------------------------------------------------
+// turbo4 fused MMA decode dispatch (mirrors the f16 switch helpers, type-parametric).
+// Only reached from the gate for turbo4 K==V, D in {128,256}, Q->ne[1] <= 4, turing MMA.
+//
+// The reachable (ncols1, ncols2) set for Q->ne[1] in {1..4} with GQA-packing is exactly
+// {(1,8),(2,8),(4,8),(2,4),(4,4),(4,2),(8,1)} — the 7 compiled instances per D. Each ncols2
+// has an explicit dispatcher so ONLY those pairs are instantiated (an unguarded ncols1=8/ncols2
+// fallthrough would also instantiate uncompiled cases like (8,4) -> link error).
+
+template <int DKQ, int DV, ggml_type type_K, ggml_type type_V>
+static void ggml_cuda_flash_attn_ext_mma_turbo_dispatch_ncols1_8(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    const ggml_tensor * Q = dst->src[0]; // ncols2 == 8: (1,8),(2,8),(4,8)
+    if (Q->ne[1] <= 1) { ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 1, 8, type_K, type_V>(ctx, dst); return; }
+    if (Q->ne[1] <= 2) { ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 2, 8, type_K, type_V>(ctx, dst); return; }
+    ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 4, 8, type_K, type_V>(ctx, dst); // Q->ne[1] in {3,4}
+}
+template <int DKQ, int DV, ggml_type type_K, ggml_type type_V>
+static void ggml_cuda_flash_attn_ext_mma_turbo_dispatch_ncols1_4(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    const ggml_tensor * Q = dst->src[0]; // ncols2 == 4: (2,4),(4,4)
+    if (Q->ne[1] <= 2) { ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 2, 4, type_K, type_V>(ctx, dst); return; }
+    ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 4, 4, type_K, type_V>(ctx, dst); // Q->ne[1] in {3,4}
+}
+
+template <int DKQ, int DV, ggml_type type_K, ggml_type type_V>
+static void ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    const ggml_tensor * KQV  = dst;
+    const ggml_tensor * Q    = dst->src[0];
+    const ggml_tensor * K    = dst->src[1];
+    const ggml_tensor * V    = dst->src[2];
+    const ggml_tensor * mask = dst->src[3];
+
+    float max_bias = 0.0f;
+    memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
+
+    // Mirror the f16 use_gqa_opt computation. Quantized tensors are skipped in the nb%16 loop.
+    bool use_gqa_opt = mask && max_bias == 0.0f && K->ne[1] % FATTN_KQ_STRIDE == 0;
+    for (const ggml_tensor * t : {Q, K, V, mask}) {
+        if (t == nullptr || ggml_is_quantized(t->type)) {
+            continue;
+        }
+        for (size_t i = 1; i < GGML_MAX_DIMS; ++i) {
+            if (t->nb[i] % 16 != 0) {
+                use_gqa_opt = false;
+                break;
+            }
+        }
+    }
+
+    GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
+    const int gqa_ratio = Q->ne[2] / K->ne[2];
+
+    if (use_gqa_opt && gqa_ratio > 4) {                                  // ncols2 = 8
+        ggml_cuda_flash_attn_ext_mma_turbo_dispatch_ncols1_8<DKQ, DV, type_K, type_V>(ctx, dst);
+        return;
+    }
+    if (use_gqa_opt && gqa_ratio > 2) {                                  // ncols2 = 4
+        ggml_cuda_flash_attn_ext_mma_turbo_dispatch_ncols1_4<DKQ, DV, type_K, type_V>(ctx, dst);
+        return;
+    }
+    if (use_gqa_opt && gqa_ratio > 1) {                                  // ncols2 = 2 -> (4,2)
+        ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 4, 2, type_K, type_V>(ctx, dst);
+        return;
+    }
+    ggml_cuda_flash_attn_ext_mma_turbo_case<DKQ, DV, 8, 1, type_K, type_V>(ctx, dst); // ncols2 = 1 -> (8,1)
+}
+
+// Env latch for the fused turbo4 MMA decode path. DEFAULT OFF.
+//
+// The MMA path is correctness-validated (coherent output, KLD == VEC baseline 0.008396)
+// and faster than VEC at every depth (beats rival "buun"), BUT it is NOT bit/token-identical
+// to the VEC reference: MMA and VEC accumulate the P·V (VKQ) reduction in f16 with different
+// reduction trees (tensor-core fragment order vs per-thread VEC order), so a near-tie greedy
+// token can flip (~1 in ~25 tokens on a hard tie). This is the same irreducible f16-order
+// difference that exists between the base f16-MMA and f16-VEC kernels — not a regression — but
+// it fails strict token-identity. We therefore keep VEC the default and expose the faster MMA
+// path as opt-in via GGML_TURBO_MMA_FUSED=1.
+static bool ggml_cuda_turbo_mma_fused() {
+    static const bool v = []{
+        const char * s = getenv("GGML_TURBO_MMA_FUSED");
+        return !(s && s[0] == '0');  // default ON (faster GQA-packed MMA, quality-neutral); GGML_TURBO_MMA_FUSED=0 = VEC kill-switch
+    }();
+    return v;
 }
 
 static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
@@ -139,9 +224,41 @@ static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, gg
             GGML_ASSERT(V->ne[0] == 128);
             ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2<128, 128>(ctx, dst);
             break;
+        case 192: {
+            // MiMo-V2.5 / V2.5-Pro / V2-Flash: gqa_ratio is 8 (SWA) or 16 (full attn)
+            GGML_ASSERT(V->ne[0] == 128);
+            float max_bias = 0.0f;
+            memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
+            const bool use_gqa_opt = mask && max_bias == 0.0f;
+            GGML_ASSERT(use_gqa_opt);
+            GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
+            const int gqa_ratio = Q->ne[2] / K->ne[2];
+            if (gqa_ratio % 16 == 0) {
+                ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<192, 128, 16>(ctx, dst);
+            } else {
+                GGML_ASSERT(gqa_ratio % 8 == 0);
+                ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<192, 128,  8>(ctx, dst);
+            }
+        } break;
         case 256:
             GGML_ASSERT(V->ne[0] == 256);
             ggml_cuda_flash_attn_ext_mma_f16_switch_ncols2<256, 256>(ctx, dst);
+            break;
+        case 320:
+            // For Mistral Small 4, go straight to the ncols1 switch (ncols2=32-only build).
+            GGML_ASSERT(V->ne[0] == 256);
+            {
+                float max_bias = 0.0f;
+                memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
+
+                const bool use_gqa_opt = mask && max_bias == 0.0f;
+                GGML_ASSERT(use_gqa_opt);
+                GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
+                const int gqa_ratio = Q->ne[2] / K->ne[2];
+                GGML_ASSERT(gqa_ratio % 32 == 0);
+
+                ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1<320, 256, 32>(ctx, dst);
+            }
             break;
         case 512:
             GGML_ASSERT(V->ne[0] == 512);
@@ -301,6 +418,12 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q4_0, GGML_TYPE_Q4_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_Q8_0)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_BF16)
+
+    // Mixed f16/bf16 + q8_0 KV cache types (default build)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,  GGML_TYPE_Q8_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_F16)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_BF16, GGML_TYPE_Q8_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_Q8_0, GGML_TYPE_BF16)
 #endif // GGML_CUDA_FA_ALL_QUANTS
 
     // TurboQuant3 KV cache types (always enabled)
@@ -312,6 +435,7 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
 
     // Mixed f16/turbo3 KV cache types
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,      GGML_TYPE_TURBO3_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO3_0, GGML_TYPE_F16)
 
     // TurboQuant2 KV cache types (always enabled)
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO2_0)
@@ -322,6 +446,7 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
 
     // Mixed f16/turbo2 KV cache types
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,      GGML_TYPE_TURBO2_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO2_0, GGML_TYPE_F16)
 
     // Mixed turbo3/turbo2 KV cache types
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO2_0)
@@ -336,6 +461,7 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
 
     // Mixed f16/turbo4 KV cache types
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_F16,      GGML_TYPE_TURBO4_0)
+    FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO4_0, GGML_TYPE_F16)
 
     // Mixed turbo4/turbo3 KV cache types
     FATTN_VEC_CASES_ALL_D(GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO3_0)
@@ -350,12 +476,37 @@ static void ggml_cuda_flash_attn_ext_vec(ggml_backend_cuda_context & ctx, ggml_t
 
 // Best FlashAttention kernel for a specific GPU:
 enum best_fattn_kernel {
-    BEST_FATTN_KERNEL_NONE     =   0,
-    BEST_FATTN_KERNEL_TILE     = 200,
-    BEST_FATTN_KERNEL_VEC      = 100,
-    BEST_FATTN_KERNEL_WMMA_F16 = 300,
-    BEST_FATTN_KERNEL_MMA_F16  = 400,
+    BEST_FATTN_KERNEL_NONE    =   0,
+    BEST_FATTN_KERNEL_TILE    = 200,
+    BEST_FATTN_KERNEL_VEC     = 100,
+    BEST_FATTN_KERNEL_MMA_F16 = 400,
 };
+
+static bool ggml_cuda_fattn_kv_type_supported(ggml_type type) {
+    switch (type) {
+        case GGML_TYPE_F32:
+        case GGML_TYPE_F16:
+            return true;
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q5_0:
+        case GGML_TYPE_Q5_1:
+#ifndef GGML_CUDA_FA_ALL_QUANTS
+            return false;
+#endif // GGML_CUDA_FA_ALL_QUANTS
+        case GGML_TYPE_Q4_0:
+        case GGML_TYPE_Q8_0:
+        case GGML_TYPE_BF16:
+            return true;
+        case GGML_TYPE_TURBO2_0:
+        case GGML_TYPE_TURBO3_0:
+        case GGML_TYPE_TURBO4_0:
+            // turbo KV types; head-dim geometry is validated separately in
+            // ggml_cuda_get_best_fattn_kernel (multiples of 64 only)
+            return true;
+        default:
+            return false;
+    }
+}
 
 static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const ggml_tensor * dst) {
 #ifndef FLASH_ATTN_AVAILABLE
@@ -405,6 +556,22 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                 return BEST_FATTN_KERNEL_NONE;
             }
             break;
+        case 192:
+            if (V->ne[0] != 128 || !gqa_opt_applies) {
+                return BEST_FATTN_KERNEL_NONE;
+            }
+            if (gqa_ratio % 8 != 0) {
+                return BEST_FATTN_KERNEL_NONE;
+            }
+            break;
+        case 320:
+            if (V->ne[0] != 256 || !gqa_opt_applies) {
+                return BEST_FATTN_KERNEL_NONE;
+            }
+            if (gqa_ratio % 32 != 0) {
+                return BEST_FATTN_KERNEL_NONE;
+            }
+            break;
         case 512:
             if (V->ne[0] != K->ne[0]) {
                 return BEST_FATTN_KERNEL_NONE;
@@ -441,40 +608,19 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 #endif // GGML_CUDA_FA_ALL_QUANTS
 
-    switch (K->type) {
-        case GGML_TYPE_F32:
-        case GGML_TYPE_F16:
-            break;
-        case GGML_TYPE_Q4_1:
-        case GGML_TYPE_Q5_0:
-        case GGML_TYPE_Q5_1:
-#ifndef GGML_CUDA_FA_ALL_QUANTS
+    if (!ggml_cuda_fattn_kv_type_supported(K->type) || !ggml_cuda_fattn_kv_type_supported(V->type)) {
+        return BEST_FATTN_KERNEL_NONE;
+    }
+
+    // turbo VEC/MMA kernels are instantiated for head dims that are multiples of 64
+    {
+        auto is_turbo = [](ggml_type t) {
+            return t == GGML_TYPE_TURBO2_0 || t == GGML_TYPE_TURBO3_0 || t == GGML_TYPE_TURBO4_0;
+        };
+        if ((is_turbo(K->type) && K->ne[0] % 64 != 0) ||
+            (is_turbo(V->type) && V->ne[0] % 64 != 0)) {
             return BEST_FATTN_KERNEL_NONE;
-#endif // GGML_CUDA_FA_ALL_QUANTS
-        case GGML_TYPE_Q4_0:
-        case GGML_TYPE_Q8_0:
-        case GGML_TYPE_BF16:
-            break;
-        case GGML_TYPE_TURBO3_0:
-            // turbo3 VEC kernel instantiated for D in {64, 128, 256}.
-            if (K->ne[0] % 64 != 0) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
-            break;
-        case GGML_TYPE_TURBO2_0:
-            // turbo2 VEC kernel instantiated for D in {64, 128, 256}.
-            if (K->ne[0] % 64 != 0) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
-            break;
-        case GGML_TYPE_TURBO4_0:
-            // turbo4 VEC kernel instantiated for D in {64, 128, 256}.
-            if (K->ne[0] % 64 != 0) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
-            break;
-        default:
-            return BEST_FATTN_KERNEL_NONE;
+        }
     }
 
     if (mask && mask->ne[2] != 1) {
@@ -482,17 +628,21 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
     // For small batch sizes the vector kernel may be preferable over the kernels optimized for large batch sizes:
-    const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && K->ne[1] % FATTN_KQ_STRIDE == 0;
+    // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
+    const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && Q->ne[0] != 192 && K->ne[1] % FATTN_KQ_STRIDE == 0;
 
 #ifdef GGML_USE_HIP
-    // HIP/ROCm: the TILE/MMA/WMMA FA paths allocate unbounded f16 temp buffers
-    // for quantized KV types (K_f16, V_f16 in launch_fattn). The pool retains
-    // peak allocation size, so the temp buffer VRAM exceeds KV compression savings.
-    // This causes quantized KV to OOM before f16 on the same context length.
-    // Force VEC path which does inline dequant with zero temp buffer overhead.
-    // Trade-off: prefill is slower (sequential query processing).
+    // HIP/ROCm: the TILE/MMA/WMMA FA paths allocate large f16 temp buffers for
+    // quantized KV types (K_f16, V_f16 in launch_fattn). For SMALL batches (decode)
+    // the VEC kernel is preferred: it does inline dequant with zero temp buffer
+    // overhead, it natively supports the TurboQuant types, and it produces a
+    // HIP-graph-safe op stream (no per-call cudaMalloc/cudaFree during capture).
+    // For LARGE batches (prefill) the VEC kernel is far slower (sequential query
+    // processing), so we deliberately fall through to the TILE/MMA path which is
+    // ~3.4x faster; prefill runs eagerly (not captured) so its f16 temp buffer is
+    // allocated/freed raw in launch_fattn without violating graph-capture rules.
     // Limitation: head_dim > 256 cannot use VEC (falls through to TILE).
-    if ((ggml_is_quantized(K->type) || ggml_is_quantized(V->type)) && can_use_vector_kernel) {
+    if ((ggml_is_quantized(K->type) || ggml_is_quantized(V->type)) && can_use_vector_kernel && Q->ne[1] <= 8) {
         return BEST_FATTN_KERNEL_VEC;
     }
 #endif // GGML_USE_HIP
@@ -522,12 +672,13 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         return BEST_FATTN_KERNEL_MMA_F16;
     }
 
+    const int ncols2_max = Q->ne[0] == 320 ? 32 : ((Q->ne[0] == 576 || Q->ne[0] == 640 || Q->ne[0] == 192) ? 16 : 8);
+    int gqa_ratio_eff = 1;
+    while (gqa_ratio % (2*gqa_ratio_eff) == 0 && gqa_ratio_eff < ncols2_max) {
+        gqa_ratio_eff *= 2;
+    }
+
     if (volta_mma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72) {
-        int gqa_ratio_eff = 1;
-        const int ncols2_max = (Q->ne[0] == 576 || Q->ne[0] == 640) ? 16 : 8;
-        while (gqa_ratio % (2*gqa_ratio_eff) == 0 && gqa_ratio_eff < ncols2_max) {
-            gqa_ratio_eff *= 2;
-        }
         if (can_use_vector_kernel && Q->ne[1] * gqa_ratio_eff <= 2) {
             return BEST_FATTN_KERNEL_VEC;
         }
@@ -537,14 +688,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         return BEST_FATTN_KERNEL_MMA_F16;
     }
 
-    // Use the WMMA kernel if possible:
-    if (ggml_cuda_should_use_wmma_fattn(cc) && K->ne[1] % FATTN_KQ_STRIDE == 0 && Q->ne[0] != 40 && Q->ne[0] != 72 && Q->ne[0] != 512 && Q->ne[0] != 576 && Q->ne[0] != 640) {
-        if (can_use_vector_kernel && Q->ne[1] <= 2) {
-            return BEST_FATTN_KERNEL_VEC;
-        }
-        return BEST_FATTN_KERNEL_WMMA_F16;
-    }
-
+    // TQ: RDNA4 fast path for TurboQuant cache types — prefer VEC for quantized K/V at small q-cols
     if (amd_wmma_available(cc) && GGML_CUDA_CC_IS_RDNA4(cc) && gqa_opt_applies && Q->ne[0] <= 128 && Q->ne[0] != 40 && Q->ne[0] != 72) {
         if (can_use_vector_kernel) {
             if (!ggml_is_quantized(K->type) && !ggml_is_quantized(V->type)) {
@@ -559,27 +703,33 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
                 }
             }
         }
-        int gqa_ratio_eff = 1;
-        const int ncols2_max = (Q->ne[0] == 576 || Q->ne[0] == 640) ? 16 : 8;
-        while (gqa_ratio % (2*gqa_ratio_eff) == 0 && gqa_ratio_eff < ncols2_max) {
-            gqa_ratio_eff *= 2;
+        int gqa_ratio_eff_rdna4 = 1;
+        const int ncols2_max_rdna4 = (Q->ne[0] == 576 || Q->ne[0] == 640) ? 16 : 8;
+        while (gqa_ratio % (2*gqa_ratio_eff_rdna4) == 0 && gqa_ratio_eff_rdna4 < ncols2_max_rdna4) {
+            gqa_ratio_eff_rdna4 *= 2;
         }
-        if (Q->ne[1] * gqa_ratio_eff <= 8) {
-            return BEST_FATTN_KERNEL_TILE; // AMD WMMA is only faster if the full tile width of 16 can be utilized.
+        if (Q->ne[1] * gqa_ratio_eff_rdna4 <= 8) {
+            return BEST_FATTN_KERNEL_TILE;
         }
         return BEST_FATTN_KERNEL_MMA_F16;
     }
 
-    // Use MFMA flash attention for CDNA (MI100+):
-    if (amd_mfma_available(cc) && Q->ne[0] != 40 && Q->ne[0] != 72 && Q->ne[0] != 256 && Q->ne[0] != 512 && Q->ne[0] != 576 && Q->ne[0] != 640) {
-        const int64_t eff_nq = Q->ne[1] * (gqa_opt_applies ? gqa_ratio : 1);
-        // MMA vs tile crossover benchmarked on MI300X @ d32768:
-        //   hsk=64  (gqa=4): MMA wins at eff >= 128 (+11%)
-        //   hsk=128 (gqa=4): MMA wins at eff >= 128 (+4%)
-        if (eff_nq >= (GGML_CUDA_CC_IS_CDNA1(cc) && Q->ne[0] == 64 ? 64 : 128)) {
+    // AMD MFMA needs a certain minimum batch size to outscale the tile kernel for large head sizes.
+    if ((amd_mfma_available(cc) && Q->ne[0] <= 256) && Q->ne[0] != 40 && Q->ne[0] != 72) {
+        if ((Q->ne[0] <= 64 && Q->ne[1] * gqa_ratio_eff > 8)) {
             return BEST_FATTN_KERNEL_MMA_F16;
         }
-        // Fall through to tile kernel for small effective batch sizes.
+        if ((Q->ne[0] <= 128 && Q->ne[1] * gqa_ratio_eff > 16)) {
+            return BEST_FATTN_KERNEL_MMA_F16;
+        }
+        if ((Q->ne[0] <= 256 && Q->ne[1] * gqa_ratio_eff > 64)) {
+            return BEST_FATTN_KERNEL_MMA_F16;
+        }
+    }
+
+    // AMD WMMA is always faster than the tile kernel if the full tile width of 16 can be utilized.
+    if ((amd_wmma_available(cc) && gqa_opt_applies && Q->ne[0] <= 128) && Q->ne[0] != 40 && Q->ne[0] != 72 && Q->ne[1] * gqa_ratio_eff > 8) {
+        return BEST_FATTN_KERNEL_MMA_F16;
     }
 
     // If there are no tensor cores available, use the generic tile kernel:
@@ -599,8 +749,83 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     return BEST_FATTN_KERNEL_TILE;
 }
 
+size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * dst) {
+    GGML_ASSERT(dst->op == GGML_OP_FLASH_ATTN_EXT);
+    GGML_UNUSED(device);
+
+    const ggml_tensor * K = dst->src[1];
+    const ggml_tensor * V = dst->src[2];
+
+    GGML_ASSERT(K != nullptr);
+    GGML_ASSERT(V != nullptr);
+
+    const best_fattn_kernel kernel = ggml_cuda_get_best_fattn_kernel(device, dst);
+
+    bool need_f16_K = false;
+    bool need_f16_V = false;
+
+    switch (kernel) {
+        case BEST_FATTN_KERNEL_TILE:
+        case BEST_FATTN_KERNEL_MMA_F16:
+            need_f16_K = true;
+            need_f16_V = true;
+            break;
+        case BEST_FATTN_KERNEL_VEC:
+            need_f16_K = K->type == GGML_TYPE_F32;
+            need_f16_V = V->type == GGML_TYPE_F32;
+            break;
+        case BEST_FATTN_KERNEL_NONE:
+            break;
+    }
+
+    const ggml_cuda_flash_attn_ext_f16_extra_data f16_extra =
+        ggml_cuda_flash_attn_ext_get_f16_extra_data(dst, need_f16_K, need_f16_V);
+
+    return f16_extra.end - (uintptr_t) dst->data;
+}
+
 void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     ggml_cuda_set_device(ctx.device);
+
+    // Fused turbo MMA decode gate (DEFAULT ON — see ggml_cuda_turbo_mma_fused; GGML_TURBO_MMA_FUSED=0 disables).
+    // Routes turbo4-K==turbo4-V, D in {128,256}, decode (Q->ne[1] <= 4) onto the GQA-packed
+    // MMA path (KV read once per head-group instead of per query head). Q is ALREADY
+    // graph-rotated (src/llama-graph.cpp) and the FA output is inverse-rotated there — this
+    // path does NO inline FWHT and NO src swap. Default OFF (env unset / !=1) falls straight
+    // GGML_TURBO_MMA_FUSED=0 falls straight through to the original VEC dispatch (kill-switch).
+    {
+        const ggml_tensor * Q = dst->src[0];
+        const ggml_tensor * K = dst->src[1];
+        const ggml_tensor * V = dst->src[2];
+        const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
+        const bool turbo_matched = (K->type == V->type &&
+            (K->type == GGML_TYPE_TURBO4_0 || K->type == GGML_TYPE_TURBO3_0 || K->type == GGML_TYPE_TURBO2_0));
+        if (ggml_cuda_turbo_mma_fused() && turbo_matched
+                && Q->ne[1] <= 4 && V->ne[0] == Q->ne[0] && turing_mma_available(cc)) {
+            if (Q->ne[0] == 128) {
+                switch (K->type) {
+                    case GGML_TYPE_TURBO4_0: ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2<128, 128, GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO4_0>(ctx, dst); return;
+                    case GGML_TYPE_TURBO3_0: ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2<128, 128, GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO3_0>(ctx, dst); return;
+                    case GGML_TYPE_TURBO2_0: ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2<128, 128, GGML_TYPE_TURBO2_0, GGML_TYPE_TURBO2_0>(ctx, dst); return;
+                    default: break;
+                }
+            }
+            if (Q->ne[0] == 256) {
+                switch (K->type) {
+                    case GGML_TYPE_TURBO4_0: ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2<256, 256, GGML_TYPE_TURBO4_0, GGML_TYPE_TURBO4_0>(ctx, dst); return;
+                    case GGML_TYPE_TURBO3_0: ggml_cuda_flash_attn_ext_mma_turbo_switch_ncols2<256, 256, GGML_TYPE_TURBO3_0, GGML_TYPE_TURBO3_0>(ctx, dst); return;
+                    // turbo2 + head_dim 256: intentionally NO fused case (routes to VEC via
+                    // default below). At 2-bit KV the fused path's GQA-pack saving is tiny while the
+                    // dequant/no-pipeline overhead is unchanged, so it is neutral on high-BW GPUs and
+                    // regresses ~1-2.5% on bandwidth-limited ones (tester @everson: Gemma-12B / RTX
+                    // 5060 Ti). VEC == baseline there. turbo2 + hd128 keeps fused (a +6.6..+69% depth
+                    // win on dense models); turbo3/turbo4 stay fused at both head dims.
+                    default: break;
+                }
+            }
+        }
+    }
+
     switch (ggml_cuda_get_best_fattn_kernel(ggml_cuda_get_device(), dst)) {
         case BEST_FATTN_KERNEL_NONE:
             GGML_ABORT("fatal error");
@@ -609,9 +834,6 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
             break;
         case BEST_FATTN_KERNEL_VEC:
             ggml_cuda_flash_attn_ext_vec(ctx, dst);
-            break;
-        case BEST_FATTN_KERNEL_WMMA_F16:
-            ggml_cuda_flash_attn_ext_wmma_f16(ctx, dst);
             break;
         case BEST_FATTN_KERNEL_MMA_F16:
             ggml_cuda_flash_attn_ext_mma_f16(ctx, dst);

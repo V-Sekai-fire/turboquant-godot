@@ -96,6 +96,9 @@ typedef sycl::half2 ggml_half2;
 #define QI1_0 (QK1_0 / 32)
 #define QR1_0 1
 
+#define QI2_0 (QK2_0 / 32)
+#define QR2_0 1
+
 
 #define QI4_0 (QK4_0 / (4 * QR4_0))
 #define QR4_0 2
@@ -180,6 +183,13 @@ typedef struct {
     uint8_t qs[QK1_0 / 8]; // bits / quants
 } block_q1_0;
 static_assert(sizeof(block_q1_0) == sizeof(ggml_half) + QK1_0 / 8, "wrong q1_0 block size/padding");
+
+#define QK2_0 64
+typedef struct {
+    ggml_half d;              // delta (scale)
+    uint8_t qs[QK2_0 / 4];   // 2 bits per element
+} block_q2_0;
+static_assert(sizeof(block_q2_0) == sizeof(ggml_half) + QK2_0 / 4, "wrong q2_0 block size/padding");
 
 #define QK4_0 32
 typedef struct {
@@ -310,10 +320,9 @@ static_assert(sizeof(block_turbo3_0) == sizeof(ggml_half) + QK_TURBO3/4 + QK_TUR
 // = 68 bytes per 128 values = 4.25 bits/value → 3.8× compression vs fp16
 typedef struct {
     ggml_half  norm;                    //  2 bytes
-    ggml_half  rnorm;                   //  2 bytes (reserved, unused in 4-bit mode)
     uint8_t    qs[QK_TURBO4 / 2];      // 64 bytes: 4-bit PolarQuant indices (nibble packed)
-} block_turbo4_0;                       // 68 bytes total
-static_assert(sizeof(block_turbo4_0) == 68, "wrong turbo4_0 block size");
+} block_turbo4_0;                       // 66 bytes total (4.125 bpw, dropped dead rnorm)
+static_assert(sizeof(block_turbo4_0) == 66, "wrong turbo4_0 block size");
 #else
 // Legacy 3-bit PolarQuant + 1-bit QJL (original paper design)
 // Per block: norm(fp16) + rnorm(fp16) + 3-bit indices (48 bytes) + 1-bit QJL signs (16 bytes)
@@ -1202,11 +1211,12 @@ GGML_TABLE_BEGIN(int8_t, kvalues_iq4nl, 16)
     -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113,
 GGML_TABLE_END()
 
-// e2m1 values (doubled)
+// e2m1 values (doubled), shared by MXFP4 and NVFP4
 // ref: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
-GGML_TABLE_BEGIN(int8_t, kvalues_mxfp4, 16)
+GGML_TABLE_BEGIN(int8_t, kvalues_fp4, 16)
     0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12,
 GGML_TABLE_END()
+#define kvalues_mxfp4 kvalues_fp4
 
 #define NGRID_IQ1S 2048
 #define IQ1S_DELTA 0.125f
