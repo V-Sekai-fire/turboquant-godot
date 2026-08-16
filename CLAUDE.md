@@ -198,10 +198,27 @@ an owned org.
 
 ### Consequence for the rebase
 
-The TurboQuant rebase **cannot** be pushed to `TheTom/llama-cpp-turboquant`.
-Fork or mirror that branch into `V-Sekai-fire` first, rebase there, and pull the
-subtree from our own fork. The `turboquant` remote here stays fetch-only and
-exists purely to read the fork's history.
+The TurboQuant rebase **cannot** be pushed to `TheTom/llama-cpp-turboquant`, so
+that branch is forked into our org and the rebase happens there:
+
+| | |
+|---|---|
+| fork | `V-Sekai-fire/datasource-llama-cpp` (public, GitHub fork) |
+| default branch | `feature/turboquant-kv-cache` |
+| checkout path | `6-datasource/llama-cpp` |
+
+The name follows RFD 0111, as spelled out in
+`fabric-ws/.repo/manifests/default.xml`: the GitHub name is `<position>-<thing>`
+and the checkout path is `<n>-<position>/<thing>`, so `datasource-llama-cpp`
+checks out at `6-datasource/llama-cpp` the way `datasource-flow` checks out at
+`6-datasource/flow`. Side 6 is "an implementation of a repository":
+`modules/llm` exposes the interface as `LLMModel` / `LLMContext` / `LLMChat`,
+and llama.cpp is what implements it. It is named for the engine rather than for
+TurboQuant so the name still reads correctly if the KV-cache work is ever
+rebased away or the fork tracks plain llama.cpp.
+
+The `turboquant` remote in this repo stays fetch-only and exists purely to read
+the original fork's history. The subtree is pulled from **our** fork.
 
 ## Where inference runs
 
