@@ -97,35 +97,10 @@ else:
         ] + list(Glob(ggml_cpu_src + "arch/x86/*.cpp"))
 
 # ── llama.cpp core ────────────────────────────────────────────────────────────
-llama_sources = list(Glob(tp + "src/models/*.cpp")) + [
-    tp + "src/llama.cpp",
-    tp + "src/llama-adapter.cpp",
-    tp + "src/llama-arch.cpp",
-    tp + "src/llama-batch.cpp",
-    tp + "src/llama-chat.cpp",
-    tp + "src/llama-context.cpp",
-    tp + "src/llama-cparams.cpp",
-    tp + "src/llama-grammar.cpp",
-    tp + "src/llama-graph.cpp",
-    tp + "src/llama-hparams.cpp",
-    tp + "src/llama-impl.cpp",
-    tp + "src/llama-io.cpp",
-    tp + "src/llama-kv-cache.cpp",
-    tp + "src/llama-kv-cache-iswa.cpp",
-    tp + "src/llama-memory.cpp",
-    tp + "src/llama-memory-hybrid.cpp",
-    tp + "src/llama-memory-hybrid-iswa.cpp",
-    tp + "src/llama-memory-recurrent.cpp",
-    tp + "src/llama-mmap.cpp",
-    tp + "src/llama-model.cpp",
-    tp + "src/llama-model-loader.cpp",
-    tp + "src/llama-model-saver.cpp",
-    tp + "src/llama-quant.cpp",
-    tp + "src/llama-sampler.cpp",
-    tp + "src/llama-vocab.cpp",
-    tp + "src/unicode.cpp",
-    tp + "src/unicode-data.cpp",
-]
+# Globbed rather than listed: a hand-maintained list silently drops new
+# upstream sources on every subtree pull, which fails at link time with
+# undefined symbols rather than at build configuration.
+llama_sources = list(Glob(tp + "src/models/*.cpp")) + list(Glob(tp + "src/*.cpp"))
 
 common_sources = [
     tp + "common/common.cpp",

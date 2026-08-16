@@ -117,8 +117,17 @@ void LLMModel::_do_load() {
 
 	llama_model_params params = llama_model_default_params();
 	params.n_gpu_layers = (n_gpu_layers < 0) ? INT_MAX : n_gpu_layers;
-	params.use_mmap = use_mmap;
-	params.use_mlock = use_mlock;
+	// llama.cpp replaced the use_mmap/use_mlock booleans with a single
+	// load_mode enum; the four combinations map onto its first four values.
+	if (use_mmap && use_mlock) {
+		params.load_mode = LLAMA_LOAD_MODE_MMAP_MLOCK;
+	} else if (use_mmap) {
+		params.load_mode = LLAMA_LOAD_MODE_MMAP;
+	} else if (use_mlock) {
+		params.load_mode = LLAMA_LOAD_MODE_MLOCK;
+	} else {
+		params.load_mode = LLAMA_LOAD_MODE_NONE;
+	}
 
 	llama_model *loaded = nullptr;
 

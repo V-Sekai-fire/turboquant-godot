@@ -237,7 +237,10 @@ void LLMChat::_run_inference(const Array &p_messages) {
 	// Sampler setup.
 	llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
 	llama_sampler *sampler = llama_sampler_chain_init(sparams);
-	llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, repeat_penalty, 0.0f, 0.0f));
+	// llama.cpp's penalties sampler regained a leading n_vocab parameter.
+	llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+											 llama_vocab_n_tokens(llama_model_get_vocab(model->get_llama_model())),
+											 64, repeat_penalty, 0.0f, 0.0f));
 	llama_sampler_chain_add(sampler, llama_sampler_init_top_k(top_k));
 	llama_sampler_chain_add(sampler, llama_sampler_init_top_p(top_p, 1));
 	llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
