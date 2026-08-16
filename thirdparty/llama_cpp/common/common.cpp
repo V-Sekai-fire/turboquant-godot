@@ -17,7 +17,13 @@
 #include <cstdarg>
 #include <cstring>
 #include <ctime>
+#if !(defined(__APPLE__) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101500)
 #include <filesystem>
+#define LLAMA_HAS_STD_FILESYSTEM 1
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -939,8 +945,13 @@ bool fs_create_directory_with_parents(const std::string & path) {
 }
 
 bool fs_is_directory(const std::string & path) {
+#ifdef LLAMA_HAS_STD_FILESYSTEM
     std::filesystem::path dir(path);
     return std::filesystem::exists(dir) && std::filesystem::is_directory(dir);
+#else
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+#endif
 }
 
 std::string fs_get_cache_directory() {
@@ -1003,6 +1014,7 @@ std::vector<common_file_info> fs_list(const std::string & path, bool include_dir
     std::vector<common_file_info> files;
     if (path.empty()) return files;
 
+#ifdef LLAMA_HAS_STD_FILESYSTEM
     std::filesystem::path dir(path);
     if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir)) {
         return files;
@@ -1036,6 +1048,33 @@ std::vector<common_file_info> fs_list(const std::string & path, bool include_dir
             continue;
         }
     }
+#else
+    DIR * d = opendir(path.c_str());
+    if (!d) return files;
+    struct dirent * ent;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_name[0] == '.') continue;
+        std::string full = path + "/" + ent->d_name;
+        struct stat st;
+        if (stat(full.c_str(), &st) != 0) continue;
+        if (S_ISREG(st.st_mode)) {
+            common_file_info info;
+            info.path   = full;
+            info.name   = ent->d_name;
+            info.is_dir = false;
+            info.size   = static_cast<size_t>(st.st_size);
+            files.push_back(std::move(info));
+        } else if (include_directories && S_ISDIR(st.st_mode)) {
+            common_file_info info;
+            info.path   = full;
+            info.name   = ent->d_name;
+            info.size   = 0;
+            info.is_dir = true;
+            files.push_back(std::move(info));
+        }
+    }
+    closedir(d);
+#endif
 
     return files;
 }
