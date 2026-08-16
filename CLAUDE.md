@@ -28,14 +28,14 @@ message, and that message is the source of truth.
 
 ```
 git-subtree-dir:   thirdparty/llama_cpp
-git-subtree-split: 67559e580b10e4e47e9a6fd6218873997976886d
+git-subtree-split: fca3093c9e6544476bbb2a139a25e17dd63627e1
 ```
 
 | field | value |
 |---|---|
 | remote (`turboquant`) | `https://github.com/TheTom/llama-cpp-turboquant` |
 | branch | `feature/turboquant-kv-cache` |
-| split commit | `67559e580b10e4e47e9a6fd6218873997976886d` |
+| split commit | `fca3093c9e6544476bbb2a139a25e17dd63627e1` |
 
 That repo is public and is where TurboQuant is actually developed — the KV
 cache work has real history there across many branches. **The rebase happens in
@@ -114,9 +114,9 @@ in `ggml/include/ggml.h`:
 
 | type | id | description |
 |---|---|---|
-| `GGML_TYPE_TURBO2_0` | 42 | WHT + 2-bit PolarQuant |
-| `GGML_TYPE_TURBO3_0` | 43 | WHT + 3-bit PolarQuant |
-| `GGML_TYPE_TURBO4_0` | 44 | WHT + 4-bit PolarQuant |
+| `GGML_TYPE_TURBO2_0` | 43 | WHT + 2-bit PolarQuant |
+| `GGML_TYPE_TURBO3_0` | 44 | WHT + 3-bit PolarQuant |
+| `GGML_TYPE_TURBO4_0` | 47 | WHT + 4-bit PolarQuant |
 
 Exposed to GDScript as `LLMContext.cache_type_k` / `cache_type_v` values
 `turbo2`, `turbo3`, `turbo4` (alongside `f16`, `q8_0`, `q4_0`).
