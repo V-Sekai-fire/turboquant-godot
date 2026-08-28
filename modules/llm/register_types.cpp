@@ -33,6 +33,7 @@
 #include "llm_chat.h"
 #include "llm_context.h"
 #include "llm_model.h"
+#include "llm_server.h"
 
 #include "core/object/class_db.h"
 
@@ -54,6 +55,7 @@ void initialize_llm_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LLMModel);
 	GDREGISTER_CLASS(LLMContext);
 	GDREGISTER_CLASS(LLMChat);
+	GDREGISTER_CLASS(LLMServer);
 
 #ifdef TOOLS_ENABLED
 	Ref<ResourceImporterGGUF> gguf_importer;

@@ -36,6 +36,9 @@
 #include "core/string/ustring.h"
 
 #include <thirdparty/llama_cpp/include/llama.h>
+#ifdef LLM_HAS_MTMD
+#include <thirdparty/llama_cpp/tools/mtmd/mtmd.h>
+#endif
 
 // Loads a GGUF model file into memory asynchronously.
 // Call load() then await the loaded or load_failed signal.
@@ -50,11 +53,17 @@ class LLMModel : public RefCounted {
 	GDCLASS(LLMModel, RefCounted);
 
 	String model_path;
+	// Optional multimodal projector. When set, a mtmd_context is built after
+	// the text model loads, enabling image/audio input via LLMChat.
+	String mmproj_path;
 	int n_gpu_layers = -1;
 	bool use_mmap = true;
 	bool use_mlock = false;
 
 	llama_model *model = nullptr;
+#ifdef LLM_HAS_MTMD
+	mtmd_context *mctx = nullptr;
+#endif
 	Thread worker;
 	Mutex worker_mutex;
 	bool loading = false;
@@ -82,6 +91,13 @@ public:
 	void set_use_mlock(bool p_enabled);
 	bool get_use_mlock() const;
 
+	void set_mmproj_path(const String &p_path);
+	String get_mmproj_path() const;
+
+	// True once a mmproj has been loaded and the model reports vision support.
+	bool supports_vision() const;
+	bool supports_audio() const;
+
 	// Async: returns immediately, emits loaded or load_failed when done.
 	Error load();
 	// Async load from raw bytes (e.g. web download body in WASM linear memory).
@@ -91,6 +107,13 @@ public:
 	bool is_loading() const;
 
 	llama_model *get_llama_model() const { return model; }
+#ifdef LLM_HAS_MTMD
+	mtmd_context *get_mtmd_context() const { return mctx; }
+#else
+	// Platforms without mtmd still see the accessor, returning nothing, so callers
+	// need one runtime check rather than an #ifdef at every use.
+	void *get_mtmd_context() const { return nullptr; }
+#endif
 
 	LLMModel();
 	~LLMModel();

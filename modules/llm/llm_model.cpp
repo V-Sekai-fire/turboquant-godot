@@ -60,6 +60,11 @@ void LLMModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_use_mmap"), &LLMModel::get_use_mmap);
 	ClassDB::bind_method(D_METHOD("set_use_mlock", "enabled"), &LLMModel::set_use_mlock);
 	ClassDB::bind_method(D_METHOD("get_use_mlock"), &LLMModel::get_use_mlock);
+	ClassDB::bind_method(D_METHOD("set_mmproj_path", "path"), &LLMModel::set_mmproj_path);
+	ClassDB::bind_method(D_METHOD("get_mmproj_path"), &LLMModel::get_mmproj_path);
+	ClassDB::bind_method(D_METHOD("supports_vision"), &LLMModel::supports_vision);
+	ClassDB::bind_method(D_METHOD("supports_audio"), &LLMModel::supports_audio);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "mmproj_path"), "set_mmproj_path", "get_mmproj_path");
 	ClassDB::bind_method(D_METHOD("load"), &LLMModel::load);
 	ClassDB::bind_method(D_METHOD("load_from_buffer", "data"), &LLMModel::load_from_buffer);
 	ClassDB::bind_method(D_METHOD("unload"), &LLMModel::unload);
@@ -140,11 +145,48 @@ void LLMModel::_do_load() {
 	loaded = llama_model_load_from_file(resolved.utf8().get_data(), params);
 #endif
 
+	// The projector needs the text model, so it is built here on the worker
+	// thread rather than in load(). A projector failure is not fatal: the model
+	// still serves text, and supports_vision() reports false.
+#ifdef LLM_HAS_MTMD
+	mtmd_context *loaded_mctx = nullptr;
+	if (loaded != nullptr && !mmproj_path.is_empty()) {
+		String mm = mmproj_path;
+		if (mm.begins_with("res://") || mm.begins_with("user://")) {
+			mm = ProjectSettings::get_singleton()->globalize_path(mm);
+		}
+		mtmd_context_params mp = mtmd_context_params_default();
+		mp.use_gpu = (n_gpu_layers != 0);
+		mp.n_threads = 4;
+		mp.print_timings = false;
+		loaded_mctx = mtmd_init_from_file(mm.utf8().get_data(), loaded, mp);
+		if (loaded_mctx == nullptr) {
+			// STUB: vision is not wired up for every projector this tree can be pointed at.
+			// Gemma-4's mmproj declares projector type "gemma4uv", which the vendored
+			// clip.cpp does not register, so mtmd_init_from_file returns null here -- the
+			// file is fine, the loader simply does not know that type yet. Naming that in
+			// the message keeps it from being read as a corrupt or missing download.
+			//
+			// The failure stays non-fatal on purpose: text generation is unaffected and
+			// supports_vision() reports false, so callers can branch on it rather than
+			// discovering the gap through a crash. Media parts sent to LLMChat are dropped
+			// with their own warning.
+			ERR_PRINT("LLMModel: could not load the projector at " + mmproj_path +
+					" — continuing text-only. If the log above says \"unknown projector type\", "
+					"this build has no support for that projector yet; vision is stubbed off "
+					"rather than broken.");
+		}
+	}
+#endif
+
 	{
 		MutexLock lock(worker_mutex);
 		loading = false;
 		if (loaded != nullptr) {
 			model = loaded;
+#ifdef LLM_HAS_MTMD
+			mctx = loaded_mctx;
+#endif
 		}
 	}
 	if (loaded == nullptr) {
@@ -185,8 +227,38 @@ Error LLMModel::load_from_buffer(const PackedByteArray &p_data) {
 	return OK;
 }
 
+void LLMModel::set_mmproj_path(const String &p_path) {
+	mmproj_path = p_path;
+}
+
+String LLMModel::get_mmproj_path() const {
+	return mmproj_path;
+}
+
+bool LLMModel::supports_vision() const {
+#ifdef LLM_HAS_MTMD
+	return mctx != nullptr && mtmd_support_vision(mctx);
+#else
+	return false;
+#endif
+}
+
+bool LLMModel::supports_audio() const {
+#ifdef LLM_HAS_MTMD
+	return mctx != nullptr && mtmd_support_audio(mctx);
+#else
+	return false;
+#endif
+}
+
 void LLMModel::unload() {
 	MutexLock lock(worker_mutex);
+#ifdef LLM_HAS_MTMD
+	if (mctx != nullptr) {
+		mtmd_free(mctx);
+		mctx = nullptr;
+	}
+#endif
 	if (model != nullptr) {
 		llama_model_free(model);
 		model = nullptr;
