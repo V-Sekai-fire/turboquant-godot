@@ -45,6 +45,18 @@
 			<description>
 			</description>
 		</method>
+		<method name="supports_audio" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when a projector is loaded and the model accepts audio input. Returns [code]false[/code] when [member mmproj_path] is unset, when the projector failed to load, or on a platform built without multimodal support.
+			</description>
+		</method>
+		<method name="supports_vision" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when a projector is loaded and the model accepts image input. Returns [code]false[/code] when [member mmproj_path] is unset, when the projector failed to load, or on a platform built without multimodal support.
+			</description>
+		</method>
 		<method name="unload">
 			<return type="void" />
 			<description>
@@ -53,6 +65,10 @@
 		</method>
 	</methods>
 	<members>
+		<member name="mmproj_path" type="String" setter="set_mmproj_path" getter="get_mmproj_path" default="&quot;&quot;">
+			Path to a multimodal projector in GGUF form. Empty means text only.
+			The projector is loaded after the text model, because it needs one. A projector that fails to load is not fatal: the model still serves text and [method supports_vision] reports [code]false[/code], so a wrong or missing file degrades rather than stopping the load.
+		</member>
 		<member name="model_path" type="String" setter="set_model_path" getter="get_model_path" default="&quot;&quot;">
 			Path to the GGUF model file. Accepts absolute or [code]res://[/code] paths.
 		</member>

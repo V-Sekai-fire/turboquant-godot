@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="LLMServer" inherits="MainLoop" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Serves an [LLMModel] over HTTP on an OpenAI-compatible surface.
+	</brief_description>
+	<description>
+		A [MainLoop], so it runs with no scene:
+		[codeblock lang=text]
+		godot --headless --main-loop LLMServer
+		[/codeblock]
+		Answers [code]GET /health[/code], [code]GET /v1/models[/code], [code]POST /v1/chat/completions[/code] (streaming when the body sets [code]stream[/code]) and [code]POST /rpc[/code].
+		Configuration is read from the environment at startup: [code]LLM_MODEL[/code] (required), [code]LLM_MMPROJ[/code], [code]LLM_HOST[/code], [code]LLM_PORT[/code], [code]LLM_ALIAS[/code], [code]LLM_CTX[/code], [code]LLM_CTK[/code], [code]LLM_CTV[/code], [code]LLM_NGL[/code] and [code]LLM_THREADS[/code].
+		It is an event loop rather than a worker thread because [LLMChat] emits its signals through [method Object.call_deferred]: a blocking wait for a completion would deadlock against the main thread that delivers it. [LLMChat] takes one request at a time, so clients queue.
+	</description>
+	<tutorials>
+	</tutorials>
+</class>

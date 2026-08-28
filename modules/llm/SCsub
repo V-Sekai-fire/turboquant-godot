@@ -15,7 +15,9 @@ ggml_inc = [
     tp_abs + "ggml/src/ggml-cpu",
 ]  # amx/ subdir needs ggml-cpu-impl.h
 llama_inc = [tp_abs + "include", tp_abs + "src", tp_abs + "common", tp_abs + "vendor"]  # nlohmann/json lives here
-all_inc = ggml_inc + llama_inc + ["#modules/llm/compat"]  # spirv-headers/ shim for Windows SDK layout
+all_inc = (
+    ggml_inc + llama_inc + [tp_abs + "tools/mtmd", "#modules/llm/compat"]
+)  # spirv-headers/ shim for Windows SDK layout
 
 # ── Collision map ─────────────────────────────────────────────────────────────
 # These basenames exist as both .c and .cpp (or .m) in the source tree.
@@ -96,6 +98,20 @@ else:
             ggml_cpu_src + "arch/x86/quants.c",
         ] + list(Glob(ggml_cpu_src + "arch/x86/*.cpp"))
 
+# ── mtmd: multimodal projector (vision/audio) ─────────────────────────────────
+# Vendored under tools/mtmd. Needed for LLMModel.mmproj_path.
+mtmd_sources = [
+    tp + "tools/mtmd/clip.cpp",
+    tp + "tools/mtmd/mtmd.cpp",
+    tp + "tools/mtmd/mtmd-helper.cpp",
+    tp + "tools/mtmd/mtmd-image.cpp",
+    tp + "tools/mtmd/mtmd-audio.cpp",
+    # models/ holds one translation unit per vision or audio tower, and clip.cpp
+    # instantiates them by name. Omitting the directory links cleanly right up to the
+    # final binary and then fails on a missing vtable per model -- gemma4v and gemma4a
+    # among them, which are the two this workspace actually needs.
+] + list(Glob(tp + "tools/mtmd/models/*.cpp"))
+
 # ── llama.cpp core ────────────────────────────────────────────────────────────
 llama_sources = list(Glob(tp + "src/models/*.cpp")) + [
     tp + "src/llama.cpp",
@@ -140,6 +156,12 @@ import os as _os
 backend_sources = []
 backend_defines = []
 platform = env["platform"]
+
+# mtmd only on desktop. It pulls in image and audio decoding and 25 per-model
+# vision/audio towers, none of which is wanted on a phone or in a browser. The flag
+# gates the sources below AND the module code that calls them, because guarding only
+# the sources leaves llm_model.h including <mtmd.h> on a target that never built it.
+_has_mtmd = platform in ("macos", "linuxbsd", "windows")
 sys.path.insert(0, Dir("#modules/llm").abspath)
 
 # ── Metal: macOS and iOS ──────────────────────────────────────────────────────
@@ -227,6 +249,7 @@ env_tp.Append(
         # CPU backend required even on web: llama.cpp uses it for tensor buffer allocation
         # even when all compute runs on WebGPU.
         "GGML_USE_CPU",
+        *(["LLM_HAS_MTMD"] if _has_mtmd else []),
         # On wasm32, no x86/arm SIMD — select scalar fallbacks via arch-fallback.h
         # (mirrors what upstream CMakeLists does for generic/non-SIMD platforms).
         *(["GGML_CPU_GENERIC"] if env["platform"] == "web" else []),
@@ -266,7 +289,13 @@ if platform == "linuxbsd":
 
 env_tp.add_source_files(
     env.modules_sources,
-    ggml_c_sources + ggml_cpp_sources + ggml_cpu_sources + llama_sources + common_sources + backend_sources,
+    ggml_c_sources
+    + ggml_cpp_sources
+    + ggml_cpu_sources
+    + llama_sources
+    + common_sources
+    + backend_sources
+    + (mtmd_sources if _has_mtmd else []),
 )
 
 

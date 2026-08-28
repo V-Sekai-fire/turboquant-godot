@@ -250,6 +250,15 @@ xcuserdata/
 
 # Build results
 [Dd]ebug/
+
+# ...except vendored source that happens to live in a directory called debug/.
+# tools/mtmd/debug/ holds mtmd-debug.h, which mtmd.cpp includes unconditionally. The
+# rule above is for Visual Studio build output, and it silently swallowed a header:
+# the file was absent from the vendored tree for this reason, and re-adding it locally
+# left it uncommitted, so every platform that compiles mtmd built here and failed in
+# CI while the platforms that skip mtmd passed.
+!thirdparty/llama_cpp/tools/mtmd/debug/
+!thirdparty/llama_cpp/tools/mtmd/debug/**
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/

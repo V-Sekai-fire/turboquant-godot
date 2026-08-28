@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["LLMModel", "LLMContext", "LLMChat"]
+    return ["LLMModel", "LLMContext", "LLMChat", "LLMServer"]
 
 
 def get_doc_path():

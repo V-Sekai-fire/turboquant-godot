@@ -37,9 +37,14 @@
 #include "core/os/mutex.h"
 #include "core/os/thread.h"
 #include "core/string/ustring.h"
+#include "core/templates/vector.h"
 #include "core/variant/array.h"
 
 #include <thirdparty/llama_cpp/include/llama.h>
+#ifdef LLM_HAS_MTMD
+#include <thirdparty/llama_cpp/tools/mtmd/mtmd-helper.h>
+#include <thirdparty/llama_cpp/tools/mtmd/mtmd.h>
+#endif
 
 #include <atomic>
 #include <vector>
@@ -85,7 +90,14 @@ class LLMChat : public RefCounted {
 
 	static void _worker_func(void *p_data);
 	void _run_inference(const Array &p_messages);
-	String _apply_chat_template(const Array &p_messages) const;
+	// Shared sampling loop, entered after either prefill path.
+	void _generate(llama_context *lctx, const llama_vocab *vocab, int p_n_past);
+	// Builds the prompt. OpenAI-style content arrays are flattened to text, with
+	// each media part replaced by the model's media marker and its decoded bytes
+	// appended to r_media in the same order.
+	String _apply_chat_template(const Array &p_messages, Vector<PackedByteArray> &r_media) const;
+	// Decodes a data: URI or reads a local file. Returns false if neither.
+	static bool _decode_media_ref(const String &p_url, PackedByteArray &r_bytes);
 
 protected:
 	static void _bind_methods();
